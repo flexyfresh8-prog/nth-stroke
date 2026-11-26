@@ -138,25 +138,39 @@ export function minJerk(t: number, T: number): number {
 }
 
 /**
- * Signal-dependent motor noise. Returns a per-sample 2-D offset produced by
- * an Ornstein–Uhlenbeck process whose noise amplitude scales with speed.
+ * Signal-dependent motor noise. Returns a per-sample 2-D offset made of two
+ * Ornstein–Uhlenbeck components:
+ *  - fast physiological tremor (short time constant, ~0.1 px), and
+ *  - slow hand wander (long time constant, ~0.45 px) that is pinned to zero
+ *    at touch-down and lift-off, so a line leaves and arrives where the
+ *    planner intended but bows slightly in between like a hand-drawn line.
+ * The earlier tremor-only noise had a stationary std of ~0.05 px, which is
+ * invisible and left every stroke looking like a perfect spline.
  */
 export function motorNoiseOffsets(
   n: number,
   speeds: number[],
   rng: Rng,
   tauMs = 55,
-  gain = 0.0032,
+  gain = 0.006,
+  wanderTauMs = 220,
+  wanderStd = 0.45,
 ): Array<{ x: number; y: number }> {
   const out: Array<{ x: number; y: number }> = [];
   let ox = 0;
   let oy = 0;
+  let wx = 0;
+  let wy = 0;
+  const wSigma = wanderStd * Math.sqrt(2 / wanderTauMs);
   for (let i = 0; i < n; i++) {
     const sigma = gain * (1 + speeds[i] * 6);
     ox += (-ox / tauMs) * SAMPLE_DT + sigma * rng.gaussian() * Math.sqrt(SAMPLE_DT);
     oy += (-oy / tauMs) * SAMPLE_DT + sigma * rng.gaussian() * Math.sqrt(SAMPLE_DT);
+    wx += (-wx / wanderTauMs) * SAMPLE_DT + wSigma * rng.gaussian() * Math.sqrt(SAMPLE_DT);
+    wy += (-wy / wanderTauMs) * SAMPLE_DT + wSigma * rng.gaussian() * Math.sqrt(SAMPLE_DT);
+    const env = Math.pow(Math.sin((Math.PI * (i + 1)) / (n + 1)), 0.7);
     // Clamp so noise is a subtle tremor, never a jump.
-    out.push({ x: clamp(ox, -1.6, 1.6), y: clamp(oy, -1.6, 1.6) });
+    out.push({ x: clamp(ox + wx * env, -1.6, 1.6), y: clamp(oy + wy * env, -1.6, 1.6) });
   }
   return out;
 }
