@@ -227,7 +227,7 @@ export class ContourPicker {
     const path = line.map((p, i, points) => {
       const a = points[Math.max(0, i - 1)], b = points[Math.min(points.length - 1, i + 1)];
       const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-      const displacement = offset + bend * Math.sin(Math.PI * i / (points.length - 1));
+      const displacement = offset + bend * Math.sin(Math.PI * i / (points.length - 1)) + (random() - 0.5) * amplitude * 0.4;
       return { x: clamp((p.x - displacement * (b.y - a.y) / len) / width, 0, 1),
         y: clamp((p.y + displacement * (b.x - a.x) / len) / height, 0, 1) };
     });
@@ -236,14 +236,24 @@ export class ContourPicker {
     const order = history.length, start = path[0], end = path.at(-1)!;
     const stage = (['Construction', 'Rough sketch', 'Refined linework'] as const)[pass];
     const weight = 0.52 + random() * 0.4;
-    const peak = 0.35 + random() * 0.32;
+    const attack = 0.06 + random() * 0.13;
+    const release = 0.10 + random() * 0.22;
+    const driftFreq = 1.4 + random() * 2.2;
+    const driftPhase = random() * 6.28318;
+    let wob = 0, wobTarget = 0;
     return { id: 's-' + (order + 1), order, stage, layer: stage.toLowerCase(), feature: best.id,
-      start, end, path, controls: [start, end], brush, size: native * (pass === 2 ? 1.05 : 0.80),
+      start, end, path, controls: [start, end], brush, size: native * (pass === 2 ? 1.05 : 0.80) * (0.85 + random() * 0.3),
       color: pass === 0 ? '#6e6660' : '#363638', opacity: [0.38, 0.58, 0.78][pass],
-      velocity: (pass === 0 ? 1.27 : 0.85) * (0.85 + random() * 0.45),
+      velocity: (pass === 0 ? 1.27 : 0.85) * (0.72 + random() * 0.62),
       pressure: path.map((_, i) => {
         const t = i / (path.length - 1);
-        return 0.06 + weight * Math.pow(Math.sin(Math.PI * Math.pow(t, peak + 0.45)), 0.65);
+        if (i % 3 === 0) wobTarget = (random() - 0.5) * 0.1;
+        wob += (wobTarget - wob) * 0.5;
+        // Uneven attack and release instead of a symmetric sine envelope.
+        const envelope = t < attack ? Math.pow(t / attack, 0.72)
+          : t > 1 - release ? Math.pow(Math.max(0, (1 - t) / release), 0.64) : 1;
+        const drift = Math.sin(t * driftFreq * Math.PI + driftPhase) * 0.08;
+        return clamp(0.05 + weight * envelope + drift + wob, 0.03, 0.98);
       }),
     };
   }

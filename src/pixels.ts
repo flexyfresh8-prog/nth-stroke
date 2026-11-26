@@ -24,6 +24,17 @@ export function nibLength(nib: PixelNib) {
   return nib.track?.length ?? (nib.vertical ? nib.height : nib.width);
 }
 
+// Deterministic per-nib randomness — replay and live drawing stay identical.
+function prng(seed: number) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), s | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export class PixelRefinement {
   readonly artwork: ImageData;
   private readonly paint: Uint32Array;
@@ -90,6 +101,10 @@ export class PixelRefinement {
     if (!selected) return;
     const patch = selected;
     const cx = patch.x + (patch.width - 1) / 2, cy = patch.y + (patch.height - 1) / 2;
+    // Start strokes from anywhere in the cell, not its geometric center.
+    const cellRng = prng((Math.imul(patch.x + patch.y * 977 + 13, 0x27d4eb2f) ^ Math.imul(order + 1, 0x9e3779b1)) >>> 0);
+    const jx = (cellRng() - 0.5) * this.spacing * 0.6;
+    const jy = (cellRng() - 0.5) * this.spacing * 0.6;
     let anchor = -1, priority = -Infinity;
     const target = this.reference.pixels.data;
     const actual = this.artwork.data;
@@ -99,20 +114,26 @@ export class PixelRefinement {
         if (this.paint[p] === this.source[p]) continue;
         let error = 0;
         for (let c = 0; c < 4; c++) error += Math.abs(target[p * 4 + c] - actual[p * 4 + c]);
-        const value = error / 600 - Math.hypot(x - cx, y - cy) / this.spacing;
+        const value = error / 600 - Math.hypot(x - cx - jx, y - cy - jy) / this.spacing;
         if (value > priority) { priority = value; anchor = p; }
       }
     }
     if (anchor === -1) throw new Error('Inconsistent pixel count');
+    const rng = prng((Math.imul(order + 1, 0x9e3779b1) ^ Math.imul(patch.x + 1, 0x85ebca6b) ^ Math.imul(patch.y + 1, 0xc2b2ae35)) >>> 0);
     const center = { x: anchor % width + 0.5, y: Math.floor(anchor / width) + 0.5 };
     const { sample, gx, gy, edge } = this.reference;
     const site = (p: Point) => Math.floor(p.y * sample.height / height) * sample.width + Math.floor(p.x * sample.width / width);
     const index = site(center);
     const bias = Math.sin(order * 2.39996);
-    const theta = edge[index] > 0.10 ? Math.atan2(gy[index], gx[index]) + Math.PI / 2 : -0.57 + bias * 0.38;
-    const radius = Math.max(1.1, this.spacing * (0.9 - 0.44 * edge[index]));
-    const stride = Math.max(0.28, radius * 0.22);
-    const steps = Math.ceil(this.spacing * (1.12 + 0.42 * Math.abs(bias)) / stride);
+    const theta = edge[index] > 0.10
+      ? Math.atan2(gy[index], gx[index]) + Math.PI / 2 + (rng() - 0.5) * 0.5
+      : -0.57 + bias * 0.38 + (rng() - 0.5) * 0.6;
+    const radius = Math.max(1.1, this.spacing * (0.9 - 0.44 * edge[index]) * (0.88 + rng() * 0.24));
+    const stride = Math.max(0.24, radius * (0.15 + rng() * 0.13));
+    const steps = Math.ceil(this.spacing * (1.02 + rng() * 0.5) / stride);
+    const taper = 0.58 + rng() * 0.26;
+    const taperPow = 1.25 + rng() * 0.85;
+    let wob = 0, wobTarget = 0;
     const half = (sign: number) => {
       const points: Array<Point & { radius: number }> = [];
       let angle = theta + (sign < 0 ? Math.PI : 0), p = center;
@@ -122,12 +143,16 @@ export class PixelRefinement {
           const tangent = Math.atan2(gy[j], gx[j]) + Math.PI / 2;
           angle += 0.23 * Math.atan2(Math.sin(2 * (tangent - angle)), Math.cos(2 * (tangent - angle)));
         }
-        angle += sign * bias * 0.024;
+        angle += sign * bias * 0.024 + (rng() - 0.5) * 0.05;
+        if (i % 2 === 0) wobTarget = (rng() - 0.5) * 0.16;
+        wob += (wobTarget - wob) * 0.45;
         const x = clamp(p.x + Math.cos(angle) * stride, 0.5, width - 0.5);
         const y = clamp(p.y + Math.sin(angle) * stride, 0.5, height - 0.5);
         if (Math.hypot(x - p.x, y - p.y) < 0.02) break;
         p = { x, y };
-        points.push({ x, y, radius: Math.max(0.6, radius * (1 - 0.72 * (i / steps) ** 1.6)) });
+        // Every nib tapers differently, like a real hand-laid tip.
+        const fall = Math.pow(i / steps, taperPow);
+        points.push({ x, y, radius: Math.max(0.35, radius * (1 - taper * fall) * (1 + wob * 0.4)) });
       }
       return points;
     };

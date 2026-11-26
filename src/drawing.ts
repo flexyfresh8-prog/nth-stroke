@@ -174,9 +174,8 @@ export class LiveBrush {
         continue;
       }
       const pencil = ['graphite', 'mechanical', 'colored-pencil', 'ballpoint', 'fineliner', 'hatching', 'anime'].includes(this.config.style);
-      const group = Math.floor(order / 11);
-      const hatchAngle = -0.7 + Math.sin(group * 2.7) * 0.17 + (passIndex > 3 && group % 4 === 0 ? 1.18 : 0);
-      const stayNearby = last && order % 11 !== 0;
+      const hatchAngle = -0.7 + Math.sin(order * 0.31) * 0.24 + (rng() - 0.5) * 0.52 + (passIndex > 3 && rng() < 0.22 ? 1.18 : 0);
+      const stayNearby = last && rng() < 0.84;
       let best: Candidate | undefined;
       const anchors: { i: number; score: number }[] = [];
       const offset = Math.floor(rng() * pixelCount);
@@ -208,17 +207,27 @@ export class LiveBrush {
         const angle = pencil && edge[anchor.i] < 0.42 ? hatchAngle : this.angleAt(anchor.i, passIndex, order, style.hatch);
         const edgeFactor = passIndex < 3 ? 1 : 1 - edge[anchor.i] * this.config.edgePreservation * 0.57;
         const pencilWidth = passIndex === 3 ? 0.57 : 0.47;
-        const size = Math.max(0.46, unit * pass.width * style.width * edgeFactor * (pencil ? pencilWidth : 1));
+        const size = Math.max(0.46, unit * pass.width * style.width * edgeFactor * (pencil ? pencilWidth : 1) * mix(0.85, 1.18, rng()));
         const length = unit * pass.length * (pencil ? 1.85 : 1.35) * mix(0.72, 1.35, this.config.strokeComplexity) * mix(0.73, 1.25, rng());
-        const path = this.trace(anchor.i, angle, length, passIndex, pass.contrast);
+        const path = this.trace(anchor.i, angle, length, passIndex, pass.contrast, rng);
         const opacity = pass.opacity * style.opacity;
         const candidate = this.fit(path, current, size, opacity, passIndex, anchor.score);
         if (candidate && (!best || candidate.score > best.score)) best = candidate;
       }
       if (!best) continue;
       const { path, size, rgb } = best;
-      const peak = 0.65 + rng() * 0.72;
       const weight = 0.63 + rng() * 0.31;
+      const attack = mix(0.06, 0.20, rng());
+      const release = mix(0.11, 0.34, rng());
+      const attackPow = mix(0.55, 0.95, rng());
+      const releasePow = mix(0.50, 0.85, rng());
+      const driftFreq = 1.2 + rng() * 2.4;
+      const driftPhase = rng() * 6.28318;
+      const driftAmp = 0.05 + rng() * 0.11;
+      const dip = 0.08 + rng() * 0.16;
+      const dipPos = 0.25 + rng() * 0.5;
+      const dipWidth = 0.06 + rng() * 0.14;
+      let wobble = 0, wobbleTarget = 0;
       const normalized = path.map(({ x, y }) => ({ x: x / width, y: y / height }));
       if (last && Math.hypot((last.x - normalized[0].x) * width, (last.y - normalized[0].y) * height) >
         Math.hypot((last.x - normalized.at(-1)!.x) * width, (last.y - normalized.at(-1)!.y) * height)) normalized.reverse();
@@ -231,33 +240,58 @@ export class LiveBrush {
         brush: this.config.style, size: size * nativeScale, color: hex(rgb), opacity: pass.opacity * style.opacity,
         pressure: normalized.map((_, i) => {
           const t = i / (normalized.length - 1);
-          return clamp(0.12 + Math.sin(Math.pow(t, peak) * Math.PI) * weight + (rng() - 0.5) * 0.07, 0.05, 1);
+          if (i % 3 === 0) wobbleTarget = (rng() - 0.5) * 0.12;
+          wobble += (wobbleTarget - wobble) * 0.5;
+          // Human pressure: slow asymmetric attack, wandering body, quick lift.
+          const envelope = t < attack ? Math.pow(t / attack, attackPow)
+            : t > 1 - release ? Math.pow(Math.max(0, (1 - t) / release), releasePow) : 1;
+          const drift = Math.sin(t * driftFreq * Math.PI + driftPhase) * driftAmp;
+          const hesitation = dip * Math.exp(-((t - dipPos) ** 2) / (2 * dipWidth * dipWidth + 1e-6));
+          return clamp(0.10 + weight * envelope + drift + wobble - hesitation, 0.05, 1);
         }),
-        velocity: style.speed * mix(0.86, 1.31, rng()),
+        velocity: style.speed * mix(0.72, 1.52, rng()),
       };
     }
   }
 
   private angleAt(index: number, pass: number, order: number, hatch: number) {
     const { gx, gy, edge } = this.reference;
-    const sweep = order % 7 < 4 ? -0.48 : 0.70;
+    const jitter = ((Math.imul(index + 1, 0x85ebca6b) >>> 16) / 65536 - 0.5) * 0.42;
+    const sweep = -0.48 + Math.sin(order * 0.37) * 0.2 + jitter;
     if (edge[index] < 0.065) return sweep;
     const tangent = Math.atan2(gy[index], gx[index]) + Math.PI / 2;
-    return pass === 4 ? tangent + hatch * (order % 2 ? -0.65 : 0.65) : tangent;
+    return pass === 4 ? tangent + hatch * (Math.sin(order * 1.7) > 0 ? -0.65 : 0.65) + jitter * 0.6 : tangent + jitter * 0.6;
   }
 
-  private trace(index: number, angle: number, length: number, pass: number, contrast: number): Point[] {
+  private trace(index: number, angle: number, length: number, pass: number, contrast: number, rng: () => number): Point[] {
     const { sample, tone, gx, gy, edge } = this.reference;
     const { width, height, data } = sample;
     const center = { x: index % width + 0.5, y: Math.floor(index / width) + 0.5 };
-    const step = clamp(length / 8, 0.55, 2.6);
+    const stepBase = clamp(length / 8, 0.55, 2.6);
+    // A hand never moves in uniform strides: vary the step length, let the
+    // direction drift smoothly, and let the whole line wander sideways.
+    const wobbleAmp = (pass < 3 ? 0.34 : 0.20) * stepBase;
+    let wob = 0;
+    let wobTarget = (rng() - 0.5) * wobbleAmp;
+    const driftFreq = 0.5 + rng() * 1.1;
+    const driftPhase = rng() * 6.28318;
+    const driftAmp = 0.04 + rng() * 0.07;
     const traceSide = (direction: number) => {
       const points: Point[] = [];
       let point = center;
       let dx = Math.cos(angle) * direction;
       let dy = Math.sin(angle) * direction;
-      for (let i = 0; i < Math.ceil(length / step / 2); i++) {
-        const next = { x: point.x + dx * step, y: point.y + dy * step };
+      for (let i = 0; i < Math.ceil(length / stepBase / 2) + 1; i++) {
+        const step = stepBase * (0.62 + rng() * 0.76);
+        if (i % 2 === 0) wobTarget = (rng() - 0.5) * wobbleAmp;
+        wob += (wobTarget - wob) * 0.42;
+        const turn = Math.sin(i * driftFreq + driftPhase) * driftAmp * (i > 1 ? 1 : 0.4) + (rng() - 0.5) * 0.05;
+        const cos = Math.cos(turn), sin = Math.sin(turn);
+        const rx = dx * cos - dy * sin;
+        const ry = dx * sin + dy * cos;
+        const norm = Math.hypot(rx, ry) || 1;
+        const ux = rx / norm, uy = ry / norm;
+        const next = { x: point.x + ux * step - uy * wob, y: point.y + uy * step + ux * wob };
         if (next.x < 0.18 || next.y < 0.18 || next.x > width - 0.18 || next.y > height - 0.18) break;
         const j = Math.floor(next.x) + Math.floor(next.y) * width;
         if (pass < 3 && i > 0 && edge[j] < 0.085) break;
@@ -271,13 +305,13 @@ export class LiveBrush {
         const orientation = Math.atan2(gy[j], gx[j]) + Math.PI / 2;
         const tx = Math.cos(orientation);
         const ty = Math.sin(orientation);
-        const sign = tx * dx + ty * dy < 0 ? -1 : 1;
+        const sign = tx * ux + ty * uy < 0 ? -1 : 1;
         const steer = pass < 3 ? 0.62 : 0.36;
-        const vx = mix(dx, tx * sign, steer);
-        const vy = mix(dy, ty * sign, steer);
-        const norm = Math.hypot(vx, vy);
-        dx = vx / norm;
-        dy = vy / norm;
+        const vx = mix(ux, tx * sign, steer);
+        const vy = mix(uy, ty * sign, steer);
+        const vnorm = Math.hypot(vx, vy);
+        dx = vx / vnorm;
+        dy = vy / vnorm;
       }
       return points;
     };
