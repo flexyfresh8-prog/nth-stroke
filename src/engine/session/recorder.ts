@@ -46,13 +46,15 @@ export class SessionRecorder {
   readonly opRecords: OpRecord[] = [];
   readonly corrections: Array<{ t: number; opId: number; reason: string }> = [];
   private t0 = Date.now();
+  private version = ENGINE_VERSION;
 
-  reset(seed: number, config: unknown) {
+  reset(seed: number, config: unknown, version = ENGINE_VERSION) {
+    this.version = version;
     this.events.length = 0;
     this.opRecords.length = 0;
     this.corrections.length = 0;
     this.t0 = Date.now();
-    this.events.push({ type: 'engine-start', t: 0, wallTime: this.t0, version: ENGINE_VERSION, seed, config });
+    this.events.push({ type: 'engine-start', t: 0, wallTime: this.t0, version: this.version, seed, config });
   }
 
   wallTime(t: number): number {
@@ -84,6 +86,33 @@ export class SessionRecorder {
     this.events.push({ type, t, wallTime: this.wallTime(t), note });
   }
 
+  /** Rehydrate the exported, quantized event log without changing the artwork checkpoint. */
+  restore(log: unknown) {
+    if (!log || typeof log !== 'object' || !('events' in log) || !Array.isArray(log.events)) return;
+    this.events.length = 0;
+    this.opRecords.length = 0;
+    this.corrections.length = 0;
+    function sample(values: number[]): StylusSample {
+      const [t,x,y,z,pressure,v,tilt,azimuth] = values;
+      return {t,x,y,z,pressure,v,tilt,azimuth};
+    }
+    for (const item of log.events.slice(0, 400000)) {
+      if (!item || typeof item.type !== 'string') continue;
+      if (item.type === 'op' && item.op && Array.isArray(item.samples)) {
+        const record: OpRecord = {...item,samples:item.samples.map(sample),simulated:true};
+        this.opRecords.push(record);
+        this.events.push({type:'op',t:item.t,record});
+      } else if (item.type === 'user-op' && Array.isArray(item.samples)) {
+        this.events.push({type:'user-op',t:item.t,record:{instrument:item.instrument,samples:item.samples.map(sample),wallTime:item.wallTime,simulated:false}});
+      } else if (item.type !== 'op' && item.type !== 'user-op') {
+        const event=item as SessionEvent;
+        this.events.push(event);
+        if(event.type==='engine-start'){this.t0=event.wallTime;this.version=event.version;}
+        if(event.type==='correction')this.corrections.push({t:event.t,opId:event.opId,reason:event.reason});
+      }
+    }
+  }
+
   /** Downsample contact samples for compact storage. */
   static compressSamples(samples: StylusSample[], max = 72): StylusSample[] {
     if (samples.length <= max) return samples;
@@ -99,7 +128,7 @@ export class SessionRecorder {
   export(): object {
     return {
       format: 'nth-session',
-      version: ENGINE_VERSION,
+      version: this.version,
       generated: new Date().toISOString(),
       note: 'All stylus trajectories are simulated data produced by the NTH Stroke engine; they are not human stylus recordings.',
       events: this.events.map((e) => {

@@ -8,6 +8,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTheme } from 'next-themes';
+import type { EngineId } from '@/engine/control/contract';
+import { DEFAULT_CONFIG } from '@/engine/core/types';
+import { ADAPTIVE_DEFAULTS, type AdaptiveConfig, type AdaptiveSettings } from '@/engine/adaptive/config';
+import type { MapName } from '@/engine/adaptive/diagnostics';
+import type { NthProject } from '@/engine/session/exports';
+import { AdaptiveControls, AdaptiveDiagnostics, BenchmarkPanel } from './AdaptivePanels';
 import { Play, Pause, Square, RotateCcw, Download, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Camera, ImagePlus, FolderOpen, X } from 'lucide-react';
 import type { InstrumentId, StylusSample } from '@/engine/core/types';
 import { SPEED_STEPS, type PlaybackSpeed } from '@/engine/worker/protocol';
@@ -30,15 +37,48 @@ export default function Studio() {
   const { state, attachCanvas, loadReference, start, pause, resume, cancel, restart, setSpeed: setEngineSpeed, userStroke, requestExport, restoreProject, toggleTimelapse, canvasRef } = engine;
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
-  const [leftOpen, setLeftOpen] = useState(true);
-  const [rightOpen, setRightOpen] = useState(true);
+  const [leftOpen, setLeftOpen] = useState(false);
+  const [rightOpen, setRightOpen] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [seed, setSeed] = useState(20260101);
-  const [budget, setBudget] = useState(2600);
-  const [detail, setDetail] = useState(0.6);
-  const [fidelity, setFidelity] = useState(0.65);
-  const [useModels, setUseModels] = useState(true);
+  const [engineId, setEngineId] = useState<EngineId>('v2');
+  const [profiles, setProfiles] = useState<Record<EngineId,AdaptiveConfig>>({
+    v1:{...DEFAULT_CONFIG},
+    v2:{...DEFAULT_CONFIG,opBudget:6000,fidelity:.9,detailLevel:.85,paperGrain:.16,useModels:false,adaptive:ADAPTIVE_DEFAULTS},
+  });
+  const [preferencesReady, setPreferencesReady] = useState(false);
+  const {theme,setTheme}=useTheme();
+  const [compareOpen,setCompareOpen]=useState(false);
+  const [diagnosticView,setDiagnosticView]=useState<MapName>('Residual');
+  const referenceFile=useRef<File|null>(null);
+  const referenceObject=useRef<string|null>(null);
+  const profile=profiles[engineId];
+  const {seed,opBudget:budget,detailLevel:detail,fidelity,useModels,paperGrain}=profile;
+  const adaptive={...ADAPTIVE_DEFAULTS,...profile.adaptive};
+  function updateProfile(next:Partial<AdaptiveConfig>){
+    setProfiles(prev=>({...prev,[engineId]:{...prev[engineId],...next}}));
+  }
+  useEffect(()=>{
+    setRightOpen(matchMedia('(min-width: 1001px)').matches);
+    setLeftOpen(matchMedia('(min-width: 671px)').matches);
+    try{
+      if(localStorage.getItem('nth-engine')==='v1')setEngineId('v1');
+      const saved=JSON.parse(localStorage.getItem('nth-profiles')??'null') as Partial<Record<EngineId,AdaptiveConfig>>|null;
+      if(saved)setProfiles(prev=>({v1:{...prev.v1,...saved.v1},v2:{...prev.v2,...saved.v2}}));
+    }catch{ /* memory-only preferences */ }
+    setPreferencesReady(true);
+    return ()=>{if(referenceObject.current)URL.revokeObjectURL(referenceObject.current);};
+  },[]);
+  useEffect(()=>{
+    if(!preferencesReady)return;
+    try{localStorage.setItem('nth-engine',engineId);localStorage.setItem('nth-profiles',JSON.stringify(profiles));}catch{ /* storage unavailable */ }
+  },[engineId,profiles,preferencesReady]);
+  useEffect(()=>{
+    if(engineId!=='v2'||!diagOpen||!state.scene)return;
+    engine.inspect(diagnosticView);
+    const timer=setInterval(()=>engine.inspect(diagnosticView),650);
+    return ()=>clearInterval(timer);
+  },[engineId,diagOpen,state.scene,diagnosticView,engine.inspect]);
   const [manualInstrument, setManualInstrument] = useState<InstrumentId | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -46,14 +86,31 @@ export default function Studio() {
   const canvasWrapRef = useRef<HTMLDivElement | null>(null);
   const strokeRef = useRef<Array<{ x: number; y: number; p: number; t: number }> | null>(null);
 
-  const handleFile = useCallback(
-    async (file: File) => {
-      setReferenceUrl(URL.createObjectURL(file));
-      setFileName(file.name);
-      await loadReference(file, { seed, opBudget: budget, detailLevel: detail, fidelity, useModels });
-    },
-    [loadReference, seed, budget, detail, fidelity, useModels],
-  );
+  const showReference=useCallback((file:File)=>{
+    if(referenceObject.current)URL.revokeObjectURL(referenceObject.current);
+    referenceFile.current=file;
+    referenceObject.current=URL.createObjectURL(file);
+    setReferenceUrl(referenceObject.current);
+    setFileName(file.name);
+  },[]);
+  const handleFile=useCallback(async(file:File)=>{
+    showReference(file);
+    await loadReference(file,profile,engineId);
+  },[loadReference,profile,engineId,showReference]);
+  const openProject=useCallback((file:File)=>restoreProject(file,(project:NthProject,id:EngineId,image:File)=>{
+    showReference(image);setEngineId(id);setCompareOpen(false);setManualInstrument(null);
+    setProfiles(prev=>({...prev,[id]:{...prev[id],...(project.config as Partial<AdaptiveConfig>),seed:project.seed}}));
+  }),[restoreProject,showReference]);
+  function switchEngine(id:EngineId){
+    if(engineId===id)return;
+    setEngineId(id);setCompareOpen(false);setManualInstrument(null);strokeRef.current=null;
+    if(referenceFile.current)void loadReference(referenceFile.current,profiles[id],id);
+    else cancel();
+  }
+  function applySettings(){
+    if(referenceFile.current)void loadReference(referenceFile.current,profile,engineId);
+    else restart();
+  }
 
   // Drag & drop import.
   const onDrop = useCallback(
@@ -62,9 +119,9 @@ export default function Studio() {
       setDragOver(false);
       const file = e.dataTransfer.files?.[0];
       if (file && file.type.startsWith('image/')) void handleFile(file);
-      if (file && file.name.endsWith('.nth')) void restoreProject(file);
+      if (file && /\.(nth|json)$/i.test(file.name)) void openProject(file);
     },
-    [handleFile, restoreProject],
+    [handleFile, openProject],
   );
 
   /** Map a pointer event to canvas coordinates (object-contain letterboxing). */
@@ -143,7 +200,6 @@ export default function Studio() {
 
   const running = state.snapshot?.running ?? false;
   const done = state.snapshot?.done ?? false;
-  const busy = running || state.snapshot?.phase === 'travel' || state.snapshot?.phase === 'draw';
   const cursor = state.snapshot?.cursor;
   const progress = state.snapshot?.progress ?? 0;
 
@@ -159,13 +215,21 @@ export default function Studio() {
       onDrop={onDrop}
     >
       {/* ---------------- top bar ---------------- */}
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-neutral-200 bg-white px-4">
-        <h1 className="text-[13px] font-semibold tracking-[0.22em] text-neutral-900">NTH&nbsp;STROKE</h1>
+      <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b border-neutral-200 bg-white px-3 py-1.5">
+        <h1 className="text-[14px] font-semibold tracking-[-.025em] text-neutral-900">NTH Stroke</h1>
+        <select aria-label="Drawing engine" value={engineId} onChange={e=>switchEngine(e.target.value as EngineId)}>
+          <option value="v2">V2 · Adaptive</option><option value="v1">V1 · Legacy</option>
+        </select>
+        <select aria-label="Theme" value={preferencesReady ? theme ?? 'dark' : 'dark'} onChange={e=>setTheme(e.target.value)}>
+          <option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option>
+        </select>
         <span className="hidden h-4 w-px bg-neutral-200 sm:block" />
-        <div className="hidden sm:block">
+        <div className="hidden xl:block">
           <StagePipeline stage={state.stage} />
         </div>
         <div className="ml-auto flex items-center gap-1.5">
+          <button type="button" className="studio-button" disabled={!state.scene}
+            onClick={()=>setCompareOpen(true)}>Compare</button>
           <input
             ref={fileInputRef}
             type="file"
@@ -184,20 +248,20 @@ export default function Studio() {
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) void restoreProject(f);
+              if (f) void openProject(f);
               e.target.value = '';
             }}
           />
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => fileInputRef.current?.click()} aria-label="Import reference"
             className="flex h-8 items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 text-[12px] text-neutral-700 transition-colors hover:border-neutral-300 hover:bg-neutral-50"
           >
             <ImagePlus size={14} strokeWidth={1.5} /> <span className="hidden sm:inline">Import</span>
           </button>
           <button
             type="button"
-            onClick={() => projectInputRef.current?.click()}
+            onClick={() => projectInputRef.current?.click()} aria-label="Open .nth project"
             className="flex h-8 items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 text-[12px] text-neutral-700 transition-colors hover:border-neutral-300 hover:bg-neutral-50"
           >
             <FolderOpen size={14} strokeWidth={1.5} /> <span className="hidden sm:inline">Open .nth</span>
@@ -212,7 +276,7 @@ export default function Studio() {
               <Download size={14} strokeWidth={1.5} /> Export
             </button>
             {exportOpen && (
-              <div className="absolute right-0 top-9 z-30 w-44 overflow-hidden rounded-xl border border-neutral-200 bg-white py-1 shadow-lg">
+              <div className="studio-menu absolute right-0 top-9 z-30 w-44 overflow-hidden rounded-xl border border-neutral-200 bg-white py-1 shadow-lg">
                 {([
                   ['png', 'PNG image'],
                   ['jpeg', 'JPEG image'],
@@ -240,10 +304,10 @@ export default function Studio() {
       </header>
 
       {/* ---------------- main ---------------- */}
-      <div className="flex min-h-0 flex-1">
+      <div className="studio-body relative flex min-h-0 flex-1 overflow-hidden">
         {/* left rail */}
         <aside
-          className={`${leftOpen ? 'w-60' : 'w-0'} shrink-0 overflow-hidden border-r border-neutral-200 bg-white transition-[width] duration-300 ease-in-out`}
+          data-open={leftOpen} className={`studio-rail studio-left ${leftOpen ? 'w-60' : 'w-0'} shrink-0 overflow-hidden border-r border-neutral-200 bg-white transition-[width] duration-300 ease-in-out`}
           aria-label="Reference and settings"
         >
           <div className="flex h-full w-60 flex-col gap-5 overflow-y-auto p-4">
@@ -256,28 +320,30 @@ export default function Studio() {
                   <input
                     type="number"
                     value={seed}
-                    onChange={(e) => setSeed(Number(e.target.value) || 0)}
+                    onChange={(e) => updateProfile({seed:Number(e.target.value)||0})}
                     className="h-8 w-full rounded-lg border border-neutral-200 px-2 font-mono text-[12px] focus:border-neutral-400 focus:outline-none"
                   />
                   <button
                     type="button"
-                    onClick={() => setSeed(Math.floor(Math.random() * 1e8))}
+                    onClick={() => updateProfile({seed:Math.floor(Math.random()*1e8)})}
                     className="h-8 shrink-0 rounded-lg border border-neutral-200 px-2 text-[11px] hover:bg-neutral-50"
                   >
                     New
                   </button>
                 </div>
               </label>
-              <RangeRow label="Stroke budget" value={budget} min={400} max={6000} step={100} onChange={setBudget} format={(v) => `${v}`} />
-              <RangeRow label="Detail" value={detail} min={0} max={1} step={0.05} onChange={setDetail} format={(v) => v.toFixed(2)} />
-              <RangeRow label="Fidelity" value={fidelity} min={0} max={1} step={0.05} onChange={setFidelity} format={(v) => v.toFixed(2)} />
-              <label className="mt-1 flex items-center gap-2 text-[12px] text-neutral-600">
-                <input type="checkbox" checked={useModels} onChange={(e) => setUseModels(e.target.checked)} className="h-3.5 w-3.5 accent-neutral-900" />
-                Use local vision models
-              </label>
-              <p className="mt-1.5 text-[11px] leading-snug text-neutral-400">
-                Settings apply when the next image is imported or the drawing is restarted.
-              </p>
+              {engineId==='v2'?<label className="studio-field">
+                {adaptive.automatic?'Maximum strokes':'Manual stroke budget'}
+                <input type="number" min={1000} max={100000} step={1000} value={budget}
+                  onChange={e=>updateProfile({opBudget:Number(e.target.value)})}
+                  onBlur={()=>updateProfile({opBudget:Math.max(1000,Math.min(100000,budget||1000))})}/>
+              </label>:<RangeRow label="Stroke budget" value={budget} min={400} max={6000} step={100} onChange={v=>updateProfile({opBudget:v})} format={String}/>}
+              <RangeRow label="Detail" value={detail} min={0} max={1} step={.05} onChange={v=>updateProfile({detailLevel:v})} format={v=>v.toFixed(2)}/>
+              <RangeRow label="Fidelity" value={fidelity} min={0} max={1} step={.05} onChange={v=>updateProfile({fidelity:v})} format={v=>v.toFixed(2)}/>
+              <RangeRow label="Paper texture" value={paperGrain} min={0} max={1} step={.05} onChange={v=>updateProfile({paperGrain:v})} format={v=>v.toFixed(2)}/>
+              <label className="studio-check"><input type="checkbox" checked={useModels} onChange={e=>updateProfile({useModels:e.target.checked})}/> Use local vision models</label>
+              {engineId==='v2'&&<AdaptiveControls settings={adaptive} onChange={(v:AdaptiveSettings)=>updateProfile({adaptive:v})}/>}
+              <button type="button" className="studio-button w-full" disabled={!referenceFile.current} onClick={applySettings}>Apply and clear drawing</button>
             </section>
             <section aria-label="Timelapse">
               <h2 className="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-neutral-400">Timelapse</h2>
@@ -302,7 +368,7 @@ export default function Studio() {
           <div className="flex items-center justify-between px-2 pt-1.5">
             <button
               type="button"
-              onClick={() => setLeftOpen((v) => !v)}
+              onClick={() => {setLeftOpen(!leftOpen);if(!leftOpen&&matchMedia('(max-width: 670px)').matches)setRightOpen(false);}}
               className="flex h-7 w-7 items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600"
               aria-label={leftOpen ? 'Collapse reference panel' : 'Expand reference panel'}
             >
@@ -313,7 +379,7 @@ export default function Studio() {
             </p>
             <button
               type="button"
-              onClick={() => setRightOpen((v) => !v)}
+              onClick={() => {setRightOpen(!rightOpen);if(!rightOpen&&matchMedia('(max-width: 670px)').matches)setLeftOpen(false);}}
               className="flex h-7 w-7 items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-200 hover:text-neutral-600"
               aria-label={rightOpen ? 'Collapse instruments panel' : 'Expand instruments panel'}
             >
@@ -323,7 +389,7 @@ export default function Studio() {
 
           <div
             ref={canvasWrapRef}
-            className={`relative m-2 mt-1 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl border bg-white transition-colors ${
+            className={`relative m-2 mt-1 flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-md border paper-surface transition-colors ${
               dragOver ? 'border-neutral-900 border-dashed' : 'border-neutral-200'
             } ${manualInstrument ? 'cursor-crosshair' : ''}`}
             onPointerDown={onPointerDown}
@@ -352,8 +418,7 @@ export default function Studio() {
             )}
             {!state.scene && !state.analysisPhase && (
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
-                <p className="text-[13px] text-neutral-400">Drop a reference image here</p>
-                <p className="text-[11.5px] text-neutral-300">portraits · anime · landscapes · architecture · animals · objects</p>
+                <p className="paper-label text-[13px]">Drop a reference image here</p>
               </div>
             )}
             {state.error && (
@@ -368,9 +433,9 @@ export default function Studio() {
 
           {/* transport + metrics */}
           <div className="shrink-0 border-t border-neutral-200 bg-white">
-            <div className="flex items-center gap-3 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2">
               <div className="flex items-center gap-1">
-                {!running && !done && (
+                {!running && !done && (!state.snapshot || state.snapshot.stage==='observation') && (
                   <button
                     type="button"
                     onClick={start}
@@ -389,7 +454,7 @@ export default function Studio() {
                     <Pause size={14} strokeWidth={2} /> Pause
                   </button>
                 )}
-                {!running && busy === false && !done && state.snapshot && state.snapshot.opCount > 0 && (
+                {!running && !done && state.snapshot && state.snapshot.stage!=='observation' && (
                   <button
                     type="button"
                     onClick={resume}
@@ -398,6 +463,8 @@ export default function Studio() {
                     <Play size={14} strokeWidth={2} /> Resume
                   </button>
                 )}
+                {engineId==='v2'&&done&&<button type="button" className="studio-button strong" onClick={engine.refine}>Continue refining</button>}
+                {engineId==='v2'&&!!state.snapshot?.recorded&&<button type="button" className="studio-button" onClick={engine.replay}>Replay</button>}
                 <button
                   type="button"
                   onClick={cancel}
@@ -409,7 +476,7 @@ export default function Studio() {
                 </button>
                 <button
                   type="button"
-                  onClick={restart}
+                  onClick={applySettings}
                   disabled={!state.scene}
                   className="flex h-9 w-9 items-center justify-center rounded-lg border border-neutral-200 text-neutral-600 transition-colors hover:bg-neutral-50 disabled:opacity-40"
                   aria-label="Restart drawing from the same seed"
@@ -442,6 +509,12 @@ export default function Studio() {
                 <span className="font-mono text-[11px] text-neutral-500">{Math.round(progress * 100)}%</span>
               </div>
             </div>
+            {engineId==='v2'&&!!state.snapshot?.recorded&&<label className="flex items-center gap-3 px-3 pb-1 text-[11px] text-neutral-500">
+              <span>Timeline</span><input className="min-w-0 flex-1" type="range" aria-label="Recorded stroke timeline" min={0}
+                max={state.snapshot.recorded} value={state.snapshot.position??state.snapshot.recorded}
+                onChange={e=>engine.seek(Number(e.target.value))}/>
+              <span>{state.snapshot.position??state.snapshot.recorded} / {state.snapshot.recorded}</span>
+            </label>}
             <div className="flex items-center gap-3 border-t border-neutral-100 px-3 py-1.5">
               <div className="min-w-0 flex-1">
                 <MetricsBar snapshot={state.snapshot} />
@@ -455,11 +528,14 @@ export default function Studio() {
               </button>
             </div>
           </div>
+          {compareOpen&&<BenchmarkPanel reference={referenceUrl} status={state.benchmarkStatus}
+            results={state.benchmark} run={value=>engine.compare(value,profiles.v2)} cancel={engine.stopBenchmark}
+            close={()=>{engine.stopBenchmark();setCompareOpen(false);}}/>}
         </main>
 
         {/* right rail */}
         <aside
-          className={`${rightOpen ? 'w-64' : 'w-0'} shrink-0 overflow-hidden border-l border-neutral-200 bg-white transition-[width] duration-300 ease-in-out`}
+          data-open={rightOpen} className={`studio-rail studio-right ${rightOpen ? 'w-64' : 'w-0'} shrink-0 overflow-hidden border-l border-neutral-200 bg-white transition-[width] duration-300 ease-in-out`}
           aria-label="Instruments"
         >
           <div className="flex h-full w-64 flex-col gap-5 overflow-y-auto p-4">
@@ -474,10 +550,11 @@ export default function Studio() {
 
       {/* diagnostics drawer */}
       <div
-        className={`${diagOpen ? 'h-56' : 'h-0'} shrink-0 overflow-hidden border-t border-neutral-200 bg-white transition-[height] duration-300 ease-in-out`}
+        className={`${diagOpen ? 'h-56 overflow-y-auto' : 'h-0 overflow-hidden'} shrink-0 border-t border-neutral-200 bg-white transition-[height] duration-300 ease-in-out`}
         aria-label="Engine diagnostics"
       >
-        <DiagnosticsDrawer snapshot={state.snapshot} corrections={state.corrections} scene={state.scene} />
+        {diagOpen&&(engineId==='v2'?<AdaptiveDiagnostics data={state.diagnostics} view={diagnosticView} onView={setDiagnosticView}/>
+          :<DiagnosticsDrawer snapshot={state.snapshot} corrections={state.corrections} scene={state.scene}/>)}
       </div>
 
       {/* mobile stage pipeline */}
@@ -575,10 +652,11 @@ function PencilCursor({
       }}
     >
       <div
-        className="rounded-full border border-neutral-900/70"
+        className="rounded-full border"
         style={{
           width: size,
           height: size,
+          borderColor: '#000b',
           background: cursor.z > 0.4 ? 'transparent' : `rgba(0,0,0,${0.12 + pressure * 0.5})`,
           boxShadow: `0 0 0 1px rgba(255,255,255,0.7)`,
         }}

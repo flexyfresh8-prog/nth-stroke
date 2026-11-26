@@ -14,6 +14,7 @@ const isExport = process.env.EXPORT === "1";
 const nextConfig: NextConfig = {
   // DIST_DIR lets verification builds run beside the dev server's .next.
   distDir: process.env.DIST_DIR ?? ".next",
+  env: { NEXT_PUBLIC_BASE_PATH: isExport ? process.env.BASE_PATH ?? "/nth-stroke" : "" },
   ...(isExport
     ? {
         output: "export" as const,
