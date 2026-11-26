@@ -87,9 +87,11 @@ export const INSTRUMENTS: Record<InstrumentId, InstrumentSpec> = {
     id: 'charcoal',
     label: 'Charcoal',
     class: 'charcoal',
-    baseRadius: 3.4,
-    pressureRadius: 3.8,
-    darkness: 1.42,
+    // Smaller footprint and lower deposit per pass (was 3.4 / 3.8 / 1.42):
+    // masses now build up over several layers instead of one blob-like pass.
+    baseRadius: 2.4,
+    pressureRadius: 2.6,
+    darkness: 1.05,
     saturation: 1.45,
     hardness: 0.14,
     friction: 1.1,
