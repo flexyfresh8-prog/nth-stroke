@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0f1112" />
+    <meta name="description" content="NTH Stroke — a live drawing studio for watching images become drawings, stroke by stroke." />
+    <title>NTH Stroke — Deterministic Drawing Engine</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div>
+            <div class="brand-name">NTH <span>stroke</span></div>
+            <div class="brand-subtitle">live drawing studio</div>
+          </div>
+        </div>
+        <div class="topbar-center"><span class="status-dot"></span><span id="header-status">Ready for a reference</span><span class="topbar-divider"></span><span class="mono-label">LOCAL / NO AI</span></div>
+        <div class="topbar-actions">
+          <button class="icon-btn" id="new-project-btn" title="New project" aria-label="New project">＋</button>
+          <button class="ghost-btn" id="open-project-btn">Open project</button>
+          <button class="primary-btn" id="start-btn" disabled><span class="play-glyph">▶</span> Start drawing</button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="rail left-rail">
+          <section class="panel source-panel">
+            <div class="panel-heading"><div><span class="eyebrow">01 / SOURCE</span><h2>Reference image</h2></div><span class="panel-index">A</span></div>
+            <label class="drop-zone" id="drop-zone" for="reference-input">
+              <input id="reference-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" />
+              <div class="drop-art"><span class="drop-ring"></span><span class="drop-cross"></span></div>
+              <strong id="drop-title">Drop an image here</strong>
+              <span id="drop-copy">or click to browse · PNG, JPG, WebP</span>
+            </label>
+            <div class="source-preview empty" id="source-preview"><img id="reference-img" alt="Imported reference preview" /><div class="preview-empty">Reference preview<br /><small>appears here</small></div><div class="preview-tag">REFERENCE</div></div>
+            <div class="source-meta"><span id="source-name">No source loaded</span><span id="source-dimensions">—</span></div>
+          </section>
+
+          <section class="panel plan-panel">
+            <div class="panel-heading"><div><span class="eyebrow">02 / PLAN</span><h2>Drawing settings</h2></div><span class="seed-chip" id="seed-chip">SEED —</span></div>
+            <label class="field-label" for="style-select">Drawing style</label>
+            <select id="style-select" class="select-field">
+              <option value="graphite">Graphite pencil</option><option value="mechanical">Mechanical pencil</option><option value="charcoal">Charcoal</option><option value="ballpoint">Ballpoint pen</option><option value="fineliner">Fine liner</option><option value="hatching">Cross-hatching</option><option value="anime">Anime line art</option><option value="colored-pencil" selected>Colored pencil</option><option value="digital">Digital painting</option><option value="oil">Oil painting</option><option value="watercolor">Watercolor</option><option value="photorealistic">Photorealistic illustration</option>
+            </select>
+            <label class="field-label" for="budget-select">Stroke budget</label>
+            <select id="budget-select" class="select-field"><option value="1000">Draft · 1,000</option><option value="3000" selected>Standard · 3,000</option><option value="6000">High · 6,000</option><option value="10000">Ultra · 10,000</option><option value="12000">Extreme · 12,000</option></select>
+            <label class="field-label" for="fidelity-select">Finish</label>
+            <select id="fidelity-select" class="select-field"><option value="exact">Exact pixels</option><option value="artistic">Visible brushwork</option></select>
+            <div class="field-note"><span>Budget limits brushwork. Exact pixels adds a local refinement pass for the PNG.</span></div>
+            <div class="slider-row"><div class="slider-label"><span>Stroke complexity</span><output id="complexity-value">60%</output></div><input id="complexity-range" type="range" min="10" max="100" value="60" /></div>
+            <div class="slider-row"><div class="slider-label"><span>Edge preservation</span><output id="edge-value">75%</output></div><input id="edge-range" type="range" min="0" max="100" value="75" /></div>
+            <button class="secondary-btn full-width" id="analyze-btn" disabled><span class="spark-glyph">✦</span> Analyze reference</button>
+          </section>
+
+          <section class="panel layers-panel">
+            <div class="panel-heading compact"><div><span class="eyebrow">LAYERS</span><h2>Stroke layers</h2></div></div>
+            <div class="layer-list" id="layer-list"><div class="layer-row active"><span class="layer-visibility">◉</span><span class="layer-swatch construction"></span><span>Construction</span><span class="layer-count" id="layer-construction">—</span></div><div class="layer-row"><span class="layer-visibility">◉</span><span class="layer-swatch sketch"></span><span>Rough sketch</span><span class="layer-count" id="layer-sketch">—</span></div><div class="layer-row"><span class="layer-visibility">◉</span><span class="layer-swatch colors"></span><span>Color / tone</span><span class="layer-count" id="layer-colors">—</span></div><div class="layer-row"><span class="layer-visibility">◉</span><span class="layer-swatch details"></span><span>Details</span><span class="layer-count" id="layer-details">—</span></div></div>
+          </section>
+        </aside>
+
+        <section class="canvas-column">
+          <div class="canvas-toolbar">
+            <div class="canvas-title"><span class="live-pip" id="live-pip"></span><span id="canvas-title">Blank canvas</span><span class="title-separator">/</span><span id="canvas-stage-label">Awaiting analysis</span></div>
+            <div class="canvas-tools"><button class="tool-btn active" id="select-tool" title="Playback cursor">⌁</button><button class="tool-btn" id="brush-tool" title="Manual brush">✎</button><span class="tool-divider"></span><button class="tool-btn" id="grid-btn" title="Toggle canvas grid">▦</button><button class="tool-btn" id="reference-toggle-btn" title="Show reference beside canvas">◐</button><button class="tool-btn" id="fullscreen-btn" title="Fullscreen">⛶</button></div>
+          </div>
+          <div class="canvas-stage" id="canvas-stage">
+            <div class="canvas-frame" id="canvas-frame">
+              <canvas id="draw-canvas" aria-label="Live drawing canvas"></canvas>
+              <canvas id="active-canvas" aria-hidden="true"></canvas>
+              <canvas id="manual-canvas" aria-label="Manual drawing layer"></canvas>
+              <div class="canvas-grid-overlay" id="grid-overlay"></div>
+              <div class="canvas-empty-state" id="canvas-empty-state"><div class="empty-monogram"><span></span><span></span><span></span></div><div class="empty-kicker">Import a reference to start drawing</div></div>
+              <div class="virtual-pen" id="virtual-pen"><span class="pen-nib"></span></div>
+              <div class="canvas-corner top-left">NTH / 01</div><div class="canvas-corner bottom-right" id="canvas-resolution">— × —</div>
+            </div>
+            <div class="zoom-control"><button id="zoom-out-btn">−</button><span id="zoom-label">100%</span><button id="zoom-in-btn">＋</button></div>
+            <div class="canvas-note"><span class="mini-dot"></span> Each mark responds to the current canvas.</div>
+          </div>
+          <div class="transport-bar">
+            <div class="transport-main"><button class="transport-btn" id="rewind-btn" title="Restart">↶</button><button class="transport-btn" id="prev-btn" title="Previous stroke">‹</button><button class="transport-play" id="play-btn" title="Play"><span>▶</span></button><button class="transport-btn" id="next-btn" title="Next stroke">›</button><button class="transport-btn" id="stop-btn" title="Stop">■</button></div>
+            <div class="timeline-wrap"><div class="timeline-labels"><span id="timeline-current">0 strokes</span><span id="timeline-time">00:00</span></div><input id="timeline-range" class="timeline-range" type="range" min="0" max="1000" value="0" disabled /><div class="timeline-ticks"><span>START</span><span>RECORDED STROKES</span><span>LATEST</span></div></div>
+            <div class="speed-control"><span class="speed-label">SPEED</span><select id="speed-select" class="speed-select"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="5">5×</option><option value="10">10×</option><option value="50">50×</option><option value="250">MAX</option></select></div>
+          </div>
+        </section>
+
+        <aside class="rail right-rail">
+          <section class="panel telemetry-panel">
+            <div class="panel-heading"><div><span class="eyebrow">TELEMETRY / LIVE</span><h2>Drawing signal</h2></div><span class="telemetry-live">LIVE</span></div>
+            <div class="progress-ring-wrap"><div class="progress-ring" id="progress-ring"><div><strong id="progress-value">0%</strong><span>complete</span></div></div><div class="ring-meta"><span class="stat-label">CURRENT STAGE</span><strong id="stat-stage">Awaiting reference</strong><span class="stat-label" id="similarity-label">COLOR SIMILARITY</span><strong id="stat-similarity">—</strong></div></div>
+            <div class="stat-grid"><div class="stat-cell"><span>STROKES</span><strong id="stat-strokes">0</strong></div><div class="stat-cell"><span>STROKES / SEC</span><strong id="stat-sps">—</strong></div><div class="stat-cell"><span>BRUSH SIZE</span><strong id="stat-brush">—</strong></div><div class="stat-cell"><span>STATUS</span><strong id="stat-eta">—</strong></div></div>
+            <div class="signal-bar"><div class="signal-fill" id="signal-fill"></div></div><div class="signal-caption"><span id="phase-label">IDLE</span><span id="elapsed-label">ELAPSED 00:00</span></div>
+          </section>
+
+          <section class="panel stages-panel"><div class="panel-heading compact"><div><span class="eyebrow">PROCESS / 07 STAGES</span><h2>Drawing stages</h2></div><span class="mono-label" id="stage-count">0 / 7</span></div><div class="stage-list" id="stage-list"><div class="stage-row"><span class="stage-index">01</span><span>Construction</span><span class="stage-bar"><i></i></span><strong>—</strong></div><div class="stage-row"><span class="stage-index">02</span><span>Rough sketch</span><span class="stage-bar"><i></i></span><strong>—</strong></div><div class="stage-row"><span class="stage-index">03</span><span>Refined linework</span><span class="stage-bar"><i></i></span><strong>—</strong></div><div class="stage-row"><span class="stage-index">04</span><span>Base colors</span><span class="stage-bar"><i></i></span><strong>—</strong></div><div class="stage-row"><span class="stage-index">05</span><span>Shading</span><span class="stage-bar"><i></i></span><strong>—</strong></div><div class="stage-row"><span class="stage-index">06</span><span>Fine details</span><span class="stage-bar"><i></i></span><strong>—</strong></div><div class="stage-row"><span class="stage-index">07</span><span>Iterative refinement</span><span class="stage-bar"><i></i></span><strong>—</strong></div></div></section>
+
+          <section class="panel debug-panel"><div class="panel-heading compact"><h2>Reference analysis</h2></div><div class="debug-lines"><div><span class="debug-swatch edge"></span><span>Edge strength</span><strong id="debug-edge">—</strong></div><div><span class="debug-swatch color"></span><span>Quantized palette</span><strong id="debug-colors">—</strong></div><div><span class="debug-swatch residual"></span><span>Current error</span><strong id="debug-residual">—</strong></div></div></section>
+
+          <section class="panel export-panel"><div class="panel-heading compact"><div><span class="eyebrow">DELIVER</span><h2>Export artwork</h2></div><span class="panel-index">↗</span></div><div class="export-grid"><button class="export-btn" data-export="png"><span>PNG</span><small>raster</small></button><button class="export-btn" data-export="jpeg"><span>JPEG</span><small>raster</small></button><button class="export-btn" data-export="webp"><span>WebP</span><small>raster</small></button><button class="export-btn" data-export="svg"><span>SVG</span><small>strokes</small></button><button class="export-btn wide" data-export="project"><span>.NTHSTROKE</span><small>native project</small></button></div><div class="export-note">PNG preserves exact pixels. SVG exports vector brushwork. Projects store the recorded strokes and reference.</div></section>
+        </aside>
+      </main>
+
+      <footer class="footer-bar"><span><b>NTH Stroke</b> / v0.3 live engine</span><span class="footer-center">Canvas 2D · live brushwork</span><span id="footer-message">No reference loaded</span></footer>
+    </div>
+    <input id="project-input" type="file" accept="application/json,.nthstroke" hidden />
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
