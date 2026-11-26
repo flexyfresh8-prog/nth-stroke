@@ -1,3 +1,36 @@
+# dependencies
 node_modules/
+
+# next.js
+.next/
+.next-export/
+out/
+build/
 dist/
+
+# testing
+coverage/
+
+# env & secrets
+.env
+.env.*
+
+# logs
+*.log
+
+# misc
 .DS_Store
+*.pem
+*.tsbuildinfo
+next-env.d.ts
+
+# sandbox-local
+.zscripts/
+Caddyfile
+bun.lock
+download/
+upload/
+repo-nth-stroke/
+skills/
+db/
+prisma/

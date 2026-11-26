@@ -1,4 +1,4 @@
-name: Deploy to GitHub Pages
+name: Deploy NTH Stroke to GitHub Pages
 
 on:
   push:
@@ -18,33 +18,27 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-
+          cache: npm
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
+        run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit --strict --skipLibCheck --target es2022 --module esnext --moduleResolution bundler "src/engine/**/*.ts"
+      - name: Run engine verification suite
+        run: npm test
+      - name: Static export build
+        run: npm run build:export
+        env:
+          EXPORT: 1
+          BASE_PATH: /nth-stroke
+      - name: Ensure .nojekyll (underscore asset paths)
+        run: touch out/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
         with:
-          enablement: true
-
-      - name: Build
-        run: pnpm build
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
+          path: out
 
   deploy:
     needs: build
@@ -53,6 +47,5 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
+      - id: deployment
         uses: actions/deploy-pages@v4
