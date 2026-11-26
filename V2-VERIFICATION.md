@@ -36,6 +36,6 @@ The sphere preserved the highlight and cast-shadow relationship. The cube retain
 
 - The 47-test suite checks both engines. V2 tests cover a blank start, monotonic improvement over the sphere run, lossless pigment checkpoints, deterministic results across stepping rates, replay, continuation after completion, and redistribution mass.
 - The static export builds with TypeScript checks enabled. It is served under the GitHub Pages repository prefix, including the worker and model assets.
-- Browser verification uses headless Chromium. The tablet layout checks do not verify iPad Safari on hardware.
+- Headless Chromium tests exercised Dark, Light and System, engine switching during generation, pause and cancel, project reopening, PNG export, diagnostics, comparison, and the fallback canvas transport. The local Face Landmarker loaded from the static site and classified the real portrait. Tablet and phone checks measured the responsive layout. iPad Safari hardware remains unverified.
 
 All scores are measurements on these fixtures. Pencil texture, imperfect facial detail and a 384-pixel maximum standard grid limit accuracy on highly detailed inputs.

@@ -83,7 +83,7 @@ export function useEngineWorker() {
               analysisPhase: '',
             };
           case 'snapshot':
-            return { ...prev, snapshot: msg.data };
+            return { ...prev, snapshot: msg.data, stage: msg.data.stage };
           case 'stage':
             return { ...prev, stage: msg.stage, stageReason: msg.reason };
           case 'correction':

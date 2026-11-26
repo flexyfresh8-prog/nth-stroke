@@ -182,7 +182,8 @@ async function loadReference(message: Extract<ToWorker, { type: 'load' }>, canva
     let face: FaceObservation|null=null, pose:PoseObservation|null=null, segmentation:SegmentationObservation|null=null;
     if(canModel){
       post({type:'analysis',phase:'Reading local vision features',progress:.45});
-      await provider.ensureLoaded?.();
+      if(provider instanceof BrowserMlProvider)await provider.ensureLoaded(message.engine==='v2'?'face':'all');
+      else await provider.ensureLoaded?.();
       if(id!==loadId)return false;
       const source=new OffscreenCanvas(width,height);
       source.getContext('2d')!.drawImage(bitmap,0,0,width,height);
