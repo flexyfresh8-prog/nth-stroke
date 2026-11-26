@@ -37,6 +37,20 @@ describe('V2 feedback and persistence', () => {
     expect(final.ssim).toBeGreaterThan(Math.max(blank.ssim, early.ssim) + 0.07);
     expect(final.mae).toBeLessThan(0.09);
   });
+  it('finishes timed playback without getting stuck at a stroke endpoint', () => {
+    const timed = engine();
+    timed.start();
+    for (let frame = 0; frame < 2500 && timed.running; frame++) {
+      timed.advance(timed.simTime + 800);
+    }
+    expect(timed.done).toBe(true);
+
+    const max = engine();
+    max.start();
+    max.runOps(1500);
+    expect(timed.history).toEqual(max.history);
+    expect(timed.map.density).toEqual(max.map.density);
+  });
   it('round-trips a partial project and produces byte-identical pigment at different playback speeds', () => {
     const direct = engine(),
       resumed = engine();

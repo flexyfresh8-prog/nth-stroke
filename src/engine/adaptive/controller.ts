@@ -200,12 +200,21 @@ export class AdaptiveController {
     }
     if (!this.running || this.done) return;
     const start = performance.now();
-    for (let i = 0; i < 32 && performance.now() - start < 11; i++) {
+    for (let i = 0; i < 32 && this.running && performance.now() - start < 11; i++) {
       if (!this.active && !this.plan()) break;
       const op = this.active!;
       const end = op.start + op.travel + op.duration;
-      this.simTime = Math.min(target, end);
-      const t = (this.simTime - op.start - op.travel) / op.duration;
+      // Test the absolute endpoint before normalizing. Rounding in the
+      // subtraction below can leave a completed stroke just short of 1.
+      if (target >= end) {
+        this.simTime = end;
+        this.apply(op, 1);
+        this.finish(op);
+        if (target === end) break;
+        continue;
+      }
+      this.simTime = target;
+      const t = (target - op.start - op.travel) / op.duration;
       if (t < 0) {
         const f = clamp((this.simTime - op.start) / op.travel, 0, 1);
         const eased = f * f * f * (10 + f * (-15 + f * 6));
@@ -216,10 +225,8 @@ export class AdaptiveController {
         this.pressure = 0;
         break;
       }
-      this.apply(op, t >= 1 ? 1 : t * t * (3 - 2 * t));
-      if (t >= 1) this.finish(op);
-      else break;
-      if (end >= target) break;
+      this.apply(op, t * t * (3 - 2 * t));
+      break;
     }
   }
   private plan() {
