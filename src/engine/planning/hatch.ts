@@ -2,8 +2,7 @@
  * Hatching utilities (spec §4-E). Hatches follow the form: direction comes
  * from the scene's structure-tensor orientation field, spacing from how much
  * tone is still missing, and lines stop at object boundaries so shading
- * never bleeds across contours. Cross-hatching rotates the direction for
- * subsequent layers, exactly like a graphite artist building up value.
+ * never bleeds across contours.
  */
 
 import { clamp } from '../core/math';
@@ -13,6 +12,11 @@ import type { SceneGraph } from '../analysis/scene';
 export interface HatchLine {
   points: Vec2[];
 }
+
+/** Edge strength above which a hatch stroke stops (thin line art scores low). */
+const EDGE_STOP = 0.38;
+/** Edge strength at a row start above which the row is skipped. */
+const EDGE_SKIP = 0.52;
 
 /**
  * Sample the scene orientation field at a canvas position (radians).
@@ -73,7 +77,7 @@ export function hatchStroke(scene: SceneGraph, cx: number, cy: number, angle: nu
       const nx = p.x + Math.cos(a) * step * dir;
       const ny = p.y + Math.sin(a) * step * dir;
       if (nx < 2 || ny < 2 || nx > scene.canvasWidth - 2 || ny > scene.canvasHeight - 2) break;
-      if (edgeStrengthAt(scene, nx, ny) > 0.55) break;
+      if (edgeStrengthAt(scene, nx, ny) > EDGE_STOP) break;
       p = { x: nx, y: ny };
     }
     return pts;
@@ -110,7 +114,7 @@ export function hatchBand(
     const lx = cx + px * r * spacing;
     const ly = cy + py * r * spacing;
     if (lx < 2 || ly < 2 || lx > scene.canvasWidth - 2 || ly > scene.canvasHeight - 2) continue;
-    if (edgeStrengthAt(scene, lx, ly) > 0.72) continue; // hole in the form
+    if (edgeStrengthAt(scene, lx, ly) > EDGE_SKIP) continue; // hole in the form
     const pts = hatchStroke(scene, lx, ly, angle, strokeLength);
     if (pts.length) lines.push({ points: pts });
   }

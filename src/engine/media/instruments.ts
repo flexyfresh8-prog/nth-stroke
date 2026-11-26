@@ -63,7 +63,9 @@ export const INSTRUMENTS: Record<InstrumentId, InstrumentSpec> = {
   'pencil-hb': pencil('pencil-hb', 'HB pencil', 0.78, 0.5, 0.6, 1),
   'pencil-2b': pencil('pencil-2b', '2B pencil', 0.62, 0.72, 0.82, 2),
   'pencil-4b': pencil('pencil-4b', '4B pencil', 0.46, 0.98, 1.12, 3),
-  'pencil-6b': pencil('pencil-6b', '6B pencil', 0.32, 1.28, 1.42, 4),
+  // 6B and charcoal ceilings lowered (was 1.42 / 1.62): at k=2.6 those
+  // densities composite to ~2% of paper brightness, i.e. flat black masses.
+  'pencil-6b': pencil('pencil-6b', '6B pencil', 0.32, 1.28, 1.3, 4),
   mechanical: {
     id: 'mechanical',
     label: 'Mechanical 0.5',
@@ -85,10 +87,12 @@ export const INSTRUMENTS: Record<InstrumentId, InstrumentSpec> = {
     id: 'charcoal',
     label: 'Charcoal',
     class: 'charcoal',
-    baseRadius: 3.4,
-    pressureRadius: 3.8,
-    darkness: 1.42,
-    saturation: 1.62,
+    // Smaller footprint and lower deposit per pass (was 3.4 / 3.8 / 1.42):
+    // masses now build up over several layers instead of one blob-like pass.
+    baseRadius: 2.4,
+    pressureRadius: 2.6,
+    darkness: 1.05,
+    saturation: 1.45,
     hardness: 0.14,
     friction: 1.1,
     edge: 1.0,

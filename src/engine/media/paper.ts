@@ -39,7 +39,8 @@ export class Paper {
     const n = width * heightPx;
     this.height = new Float32Array(n);
     this.albedo = new Float32Array(n);
-    // Three octaves of fine grain — fibers at paper scale.
+    // Three octaves of grain. The per-pixel octave is kept weak so tone reads
+    // as graphite on tooth rather than salt-and-pepper static.
     const s1 = seed ^ 0x1a2b3c4d;
     const s2 = mixSeed(seed, 977);
     const s3 = mixSeed(seed, 740_231);
@@ -51,7 +52,7 @@ export class Paper {
         const fine = valueNoise(x, y, 0.9, s1);
         const mid = valueNoise(x, y, 2.6, s2);
         const coarse = valueNoise(x, y, 7.5, s3);
-        const hRaw = 0.5 + (fine - 0.5) * 0.62 + (mid - 0.5) * 0.28 + (coarse - 0.5) * 0.12;
+        const hRaw = 0.5 + (fine - 0.5) * 0.34 + (mid - 0.5) * 0.4 + (coarse - 0.5) * 0.26;
         // tooth scales deviation from the mean surface.
         this.height[i] = clamp01(0.5 + (hRaw - 0.5) * tooth * 1.6);
         // Albedo mottle is very subtle, low frequency.
