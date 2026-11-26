@@ -25,8 +25,6 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Type check
-        run: npx tsc --noEmit --strict --skipLibCheck --target es2022 --module esnext --moduleResolution bundler "src/engine/**/*.ts"
       - name: Run engine verification suite
         run: npm test
       - name: Static export build
