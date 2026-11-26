@@ -28,62 +28,65 @@ export class BrowserMlProvider implements MlProvider {
   private faceModel: FaceLandmarker | null = null;
   private poseModel: PoseLandmarker | null = null;
   private segModel: ImageSegmenter | null = null;
-  private loading: Promise<void> | null = null;
+  private loading: Promise<void> = Promise.resolve();
+  private readonly attempted = new Set<'face'|'pose'|'segmentation'>();
 
   constructor(
     private readonly basePath: string,
     private readonly onStatus?: (message: string) => void,
   ) {}
 
-  /** Lazily load models and the WASM runtime (called once, off the hot path). */
-  ensureLoaded(): Promise<void> {
-    if (this.loading) return this.loading;
-    this.loading = (async () => {
-      try {
-        this.onStatus?.('loading vision runtime');
-        const fileset = await FilesetResolver.forVisionTasks(`${this.basePath}/mediapipe/wasm`);
-        const jobs: Promise<unknown>[] = [];
-        jobs.push(
-          FaceLandmarker.createFromOptions(fileset, {
-            baseOptions: { modelAssetPath: `${this.basePath}/models/face_landmarker.task`, delegate: 'CPU' },
-            runningMode: 'IMAGE',
-            numFaces: 1,
-          })
-            .then((m) => {
-              this.faceModel = m;
-            })
-            .catch(() => null),
-        );
-        jobs.push(
-          PoseLandmarker.createFromOptions(fileset, {
-            baseOptions: { modelAssetPath: `${this.basePath}/models/pose_landmarker_lite.task`, delegate: 'CPU' },
-            runningMode: 'IMAGE',
-            numPoses: 1,
-          })
-            .then((m) => {
-              this.poseModel = m;
-            })
-            .catch(() => null),
-        );
-        jobs.push(
-          ImageSegmenter.createFromOptions(fileset, {
-            baseOptions: { modelAssetPath: `${this.basePath}/models/deeplab_v3.tflite`, delegate: 'CPU' },
-            runningMode: 'IMAGE',
-            outputCategoryMask: true,
-            outputConfidenceMasks: false,
-          })
-            .then((m) => {
-              this.segModel = m;
-            })
-            .catch(() => null),
-        );
-        await Promise.all(jobs);
-        const loaded = [this.faceModel, this.poseModel, this.segModel].filter(Boolean).length;
-        this.onStatus?.(`vision models ready (${loaded}/3)`);
-      } catch (err) {
-        this.onStatus?.('vision models unavailable — classical analysis only');
+  /** Serialize model initialization because the WASM glue uses a shared factory. */
+  ensureLoaded(selection: 'face' | 'all' = 'all'): Promise<void> {
+    this.loading = this.loading.then(async () => {
+      const kinds = selection === 'face' ? ['face'] as const : ['face', 'pose', 'segmentation'] as const;
+      if (kinds.every(kind => this.attempted.has(kind))) return;
+      const inWorker = typeof document === 'undefined';
+      const worker = globalThis as typeof globalThis & { importScripts?: (...urls: string[]) => void };
+      let moduleWorker = false;
+      if (inWorker) {
+        try { worker.importScripts?.(); }
+        catch { moduleWorker = true; }
       }
-    })();
+      const assets = new URL(`${this.basePath}/`, globalThis.location.origin);
+      if (moduleWorker) {
+        // The MediaPipe loader clears ModuleFactory after initializing a graph.
+        // ESM imports are cached, so restore the module's exported factory on
+        // each load rather than depending on its first-load side effects.
+        const host = globalThis as typeof globalThis & {
+          import?: (url: string) => Promise<unknown>;
+          ModuleFactory?: unknown;
+        };
+        host.import ??= async (url) => {
+          const module = await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ url);
+          host.ModuleFactory = module.default;
+        };
+      }
+      const fileset = await FilesetResolver.forVisionTasks(new URL('mediapipe/wasm', assets).href, moduleWorker);
+      for (const kind of kinds) {
+        if (this.attempted.has(kind)) continue;
+        this.attempted.add(kind);
+        try {
+          if (kind === 'face') this.faceModel = await FaceLandmarker.createFromOptions(fileset, {
+            baseOptions: { modelAssetPath: new URL('models/face_landmarker.task', assets).href, delegate: 'CPU' },
+            runningMode: 'IMAGE', numFaces: 1,
+          });
+          else if (kind === 'pose') this.poseModel = await PoseLandmarker.createFromOptions(fileset, {
+            baseOptions: { modelAssetPath: new URL('models/pose_landmarker_lite.task', assets).href, delegate: 'CPU' },
+            runningMode: 'IMAGE', numPoses: 1,
+          });
+          else this.segModel = await ImageSegmenter.createFromOptions(fileset, {
+            baseOptions: { modelAssetPath: new URL('models/deeplab_v3.tflite', assets).href, delegate: 'CPU' },
+            runningMode: 'IMAGE', outputCategoryMask: true, outputConfidenceMasks: false,
+          });
+        } catch {
+          // Geometry-only analysis remains available if this browser cannot
+          // initialize the model's graphics and WASM runtime.
+        }
+      }
+      const loaded = [this.faceModel, this.poseModel, this.segModel].filter(Boolean).length;
+      this.onStatus?.(`vision models ready (${loaded}/3)`);
+    }).catch(() => this.onStatus?.('vision models unavailable — classical analysis only'));
     return this.loading;
   }
 

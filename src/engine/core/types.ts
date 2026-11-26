@@ -114,6 +114,8 @@ export interface EngineSnapshot {
   objective: string;
   instrument: InstrumentId | null;
   opCount: number;
+  recorded?: number;
+  position?: number;
   simTimeMs: number;
   wallTimeMs: number;
   cursor: { x: number; y: number; z: number };

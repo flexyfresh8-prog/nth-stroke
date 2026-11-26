@@ -12,6 +12,7 @@
  */
 
 import { ENGINE_VERSION, type DrawOp } from '../core/types';
+import { MEDIA, type Mark } from '../adaptive/pigment';
 import { instrument } from '../media/instruments';
 import type { OpRecord, SessionRecorder, UserOpRecord } from './recorder';
 
@@ -125,7 +126,7 @@ export function exportSvg(
   recorder: SessionRecorder,
   width: number,
   height: number,
-  meta: { seed: number; title?: string },
+  meta: { seed: number; title?: string; adaptive?: readonly Mark[] },
 ): SvgExportResult {
   const paths: string[] = [];
   let count = 0;
@@ -152,7 +153,15 @@ export function exportSvg(
     paths.push(`<path d="${d}" fill="${spec.color}" fill-opacity="${Math.min(0.95, spec.maxOpacity * (0.45 + meanP)).toFixed(2)}"/>`);
     count++;
   };
-  for (const event of recorder.events) {
+  if(meta.adaptive){
+    for (const mark of meta.adaptive) {
+      const medium=MEDIA[mark.instrument];
+      if(medium.mode==='blend'){blendOps++;continue;}
+      const path=mark.path.map((p,i)=>`${i?'L':'M'}${q(p.x)} ${q(p.y)}`).join('');
+      paths.push(`<path d="${path}" stroke="${medium.mode==='lift'?'#fff':'#000'}" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="${q(mark.radius*1.48)}" stroke-opacity="${mark.opacity.toFixed(3)}"/>`);
+      count++;
+    }
+  }else for (const event of recorder.events) {
     if (event.type === 'op') emit(event.record, event.record.op);
     else if (event.type === 'user-op') {
       emit(event.record, {
@@ -172,7 +181,7 @@ export function exportSvg(
   }
   const info = {
     generator: 'NTH Stroke autonomous drawing engine',
-    version: ENGINE_VERSION,
+    version: meta.adaptive ? '2.0.0' : ENGINE_VERSION,
     seed: meta.seed,
     strokes: count,
     note: 'Strokes are simulated stylus trajectories generated autonomously; user-drawn strokes are included. Blending-stump operations have no vector equivalent and are omitted; the .nth project file is the lossless record.',
@@ -181,7 +190,7 @@ export function exportSvg(
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     `<metadata>${JSON.stringify(info)}</metadata>` +
-    `<rect width="100%" height="100%" fill="#f4f2ee"/>` +
+    `<rect width="100%" height="100%" fill="${meta.adaptive ? '#fff' : '#f4f2ee'}"/>` +
     paths.join('') +
     `</svg>`;
   return { svg, pathCount: count, byteSize: svg.length, skippedBlendOps: blendOps };
@@ -220,6 +229,7 @@ export async function buildProjectFile(
   referenceHeight: number,
   canvasWidth: number,
   canvasHeight: number,
+  engineVersion = ENGINE_VERSION,
 ): Promise<Blob> {
   const project: NthProject = {
     format: 'nth-project',
@@ -227,7 +237,7 @@ export async function buildProjectFile(
     created: new Date().toISOString(),
     seed,
     config,
-    engineVersion: ENGINE_VERSION,
+    engineVersion,
     reference: { width: referenceWidth, height: referenceHeight, dataUrl: referenceDataUrl },
     canvas: { width: canvasWidth, height: canvasHeight },
     checkpoint,

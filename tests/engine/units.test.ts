@@ -169,7 +169,7 @@ describe('physical media engine (spec §6)', () => {
   }
 
   function horizontalStroke(y: number, pressure: number) {
-    const samples = [];
+    const samples: import('../../src/engine/core/types').StylusSample[] = [];
     for (let i = 0; i <= 40; i++) {
       samples.push({
         t: i * SAMPLE_DT,
