@@ -446,5 +446,5 @@ export function formatDuration(ms: number) {
 
 export function exportStrokeSvg(strokes: readonly Stroke[], width: number, height: number, legacy = false) {
   const paths = strokes.filter((stroke) => !stroke.detail).map((stroke) => brushSvg(stroke, width, height)).join('');
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><title>NTH Stroke brushwork</title><rect width="100%" height="100%" fill="${legacy ? '#eee8dc' : '#fff'}"/>${paths}</svg>`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="${legacy ? '#eee8dc' : '#fff'}"/>${paths}</svg>`;
 }

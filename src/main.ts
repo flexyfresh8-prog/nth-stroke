@@ -389,7 +389,7 @@ function exportProject() {
   if (!analysis || !reference) return toast('Analyze a reference before saving a project.');
   const payload: Project = {
     format: 'nthstroke', version: 2,
-    metadata: { title: reference.name, software: 'NTH Stroke 0.3', modifiedAt: new Date().toISOString(), strokeCount: engine.strokes.length },
+    metadata: { title: reference.name, modifiedAt: new Date().toISOString(), strokeCount: engine.strokes.length },
     reference: { name: reference.name, dataUrl: reference.dataUrl }, config: config(), seed: analysis.seed,
     playbackPosition: engine.snapshot().completed, history: [...engine.strokes], finished: engine.finished, legacy: engine.isLegacy,
   };
