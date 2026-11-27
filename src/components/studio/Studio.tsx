@@ -32,7 +32,9 @@ const SPEED_LABEL: Record<PlaybackSpeed, string> = {
   max: 'MAX',
 };
 
-export default function Studio() {
+export default function Studio({initial,sharedFile,sharedProject,selectVersion,shareFile,openAny}:{
+  initial:EngineId;sharedFile:File|null;sharedProject:File|null;selectVersion:(v:EngineId|'v3')=>void;shareFile:(f:File)=>void;openAny:(f:File)=>void
+}) {
   const engine = useEngineWorker();
   const { state, attachCanvas, loadReference, start, pause, resume, cancel, restart, setSpeed: setEngineSpeed, userStroke, requestExport, restoreProject, toggleTimelapse, canvasRef } = engine;
   const [referenceUrl, setReferenceUrl] = useState<string | null>(null);
@@ -41,7 +43,7 @@ export default function Studio() {
   const [rightOpen, setRightOpen] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [engineId, setEngineId] = useState<EngineId>('v2');
+  const [engineId, setEngineId] = useState<EngineId>(initial);
   const [profiles, setProfiles] = useState<Record<EngineId,AdaptiveConfig>>({
     v1:{...DEFAULT_CONFIG},
     v2:{...DEFAULT_CONFIG,opBudget:6000,fidelity:.9,detailLevel:.85,paperGrain:.16,useModels:false,adaptive:ADAPTIVE_DEFAULTS},
@@ -62,7 +64,7 @@ export default function Studio() {
     setRightOpen(matchMedia('(min-width: 1001px)').matches);
     setLeftOpen(matchMedia('(min-width: 671px)').matches);
     try{
-      if(localStorage.getItem('nth-engine')==='v1')setEngineId('v1');
+
       const saved=JSON.parse(localStorage.getItem('nth-profiles')??'null') as Partial<Record<EngineId,AdaptiveConfig>>|null;
       if(saved)setProfiles(prev=>({v1:{...prev.v1,...saved.v1},v2:{...prev.v2,...saved.v2}}));
     }catch{ /* memory-only preferences */ }
@@ -88,7 +90,7 @@ export default function Studio() {
 
   const showReference=useCallback((file:File)=>{
     if(referenceObject.current)URL.revokeObjectURL(referenceObject.current);
-    referenceFile.current=file;
+    referenceFile.current=file;shareFile(file);
     referenceObject.current=URL.createObjectURL(file);
     setReferenceUrl(referenceObject.current);
     setFileName(file.name);
@@ -101,6 +103,12 @@ export default function Studio() {
     showReference(image);setEngineId(id);setCompareOpen(false);setManualInstrument(null);
     setProfiles(prev=>({...prev,[id]:{...prev[id],...(project.config as Partial<AdaptiveConfig>),seed:project.seed}}));
   }),[restoreProject,showReference]);
+  const opened=useRef<File|null>(null);
+  useEffect(()=>{
+    if(!preferencesReady)return;
+    if(sharedProject&&opened.current!==sharedProject){opened.current=sharedProject;void openProject(sharedProject)}
+    else if(!sharedProject&&sharedFile&&referenceFile.current!==sharedFile)void handleFile(sharedFile);
+  },[preferencesReady,sharedFile,sharedProject,handleFile,openProject]);
   function switchEngine(id:EngineId){
     if(engineId===id)return;
     setEngineId(id);setCompareOpen(false);setManualInstrument(null);strokeRef.current=null;
@@ -119,7 +127,7 @@ export default function Studio() {
       setDragOver(false);
       const file = e.dataTransfer.files?.[0];
       if (file && file.type.startsWith('image/')) void handleFile(file);
-      if (file && /\.(nth|json)$/i.test(file.name)) void openProject(file);
+      if (file && /\.(nth|json)$/i.test(file.name)) void openAny(file);
     },
     [handleFile, openProject],
   );
@@ -217,8 +225,8 @@ export default function Studio() {
       {/* ---------------- top bar ---------------- */}
       <header className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b border-neutral-200 bg-white px-3 py-1.5">
         <h1 className="text-[14px] font-semibold tracking-[-.025em] text-neutral-900">NTH Stroke</h1>
-        <select aria-label="Drawing engine" value={engineId} onChange={e=>switchEngine(e.target.value as EngineId)}>
-          <option value="v2">V2 · Adaptive</option><option value="v1">V1 · Legacy</option>
+        <select aria-label="Drawing engine" value={engineId} onChange={e=>e.target.value==='v3'?selectVersion('v3'):switchEngine(e.target.value as EngineId)}>
+          <option value="v3">V3 · Structural</option><option value="v2">V2 · Adaptive</option><option value="v1">V1 · Legacy</option>
         </select>
         <select aria-label="Theme" value={preferencesReady ? theme ?? 'dark' : 'dark'} onChange={e=>setTheme(e.target.value)}>
           <option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option>
@@ -248,7 +256,7 @@ export default function Studio() {
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) void openProject(f);
+              if (f) void openAny(f);
               e.target.value = '';
             }}
           />

@@ -85,6 +85,7 @@ export async function benchmark(
           accuracy,
           count: snap.opCount,
           corrections: instance.session.corrections.length,
+          meanLength: instance.session.opRecords.reduce((sum,op)=>sum+op.drawPx,0)/(instance.session.opRecords.length||1),
           computeMs,
           memory: peak,
           rgba: buffer,

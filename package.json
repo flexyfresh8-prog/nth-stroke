@@ -50,6 +50,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "d3-contour": "^4.0.3",
     "date-fns": "^4.1.0",
     "embla-carousel-react": "^8.6.0",
     "framer-motion": "^12.23.2",
@@ -77,6 +78,7 @@
     "zustand": "^5.0.6"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "^1.2.1",
     "@tailwindcss/postcss": "^4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -84,8 +86,9 @@
     "eslint": "^9",
     "eslint-config-next": "^16.1.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "tw-animate-css": "^1.3.5",
     "typescript": "^5"
   },
-  "description": "NTH Stroke \u2014 an autonomous human-inspired drawing engine that observes, constructs, shades, evaluates and corrects graphite artwork stroke by stroke, entirely in the browser."
+  "description": "NTH Stroke — an autonomous human-inspired drawing engine that observes, constructs, shades, evaluates and corrects graphite artwork stroke by stroke, entirely in the browser."
 }

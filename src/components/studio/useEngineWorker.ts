@@ -9,6 +9,7 @@
  * that React StrictMode remounts (dev) cannot orphan the canvas transfer.
  */
 
+import { importRaster } from './importRaster';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { EngineSnapshot, InstrumentId, Stage, StylusSample } from '@/engine/core/types';
 import type { EngineId } from '@/engine/control/contract';
@@ -46,7 +47,6 @@ export function useEngineWorker() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const workerRef = useRef<Worker | null>(null);
   const sequence = useRef(0);
-  const usePatchTransport = useRef(false);
   useEffect(()=>()=>{workerRef.current?.terminate();workerRef.current=null;},[]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -137,7 +137,6 @@ export function useEngineWorker() {
           if(probe.getContext('2d'))off=canvas.transferControlToOffscreen();
         }
       }catch{ /* fall back to bitmap patches */ }
-      usePatchTransport.current=!off;
       if(!off){
         const context=canvas.getContext('2d');
         if(context){context.fillStyle='#fff';context.fillRect(0,0,canvas.width,canvas.height);}
@@ -160,19 +159,17 @@ export function useEngineWorker() {
   const loadReference=useCallback(async(file:File,options:Partial<AdaptiveConfig>,engine:EngineId)=>{
     const id=beginLoad();
     try{
-      const bitmap=await createImageBitmap(file);
-      if(id!==sequence.current){bitmap.close();return;}
       const performanceMode=options.adaptive?.performance??'auto';
       const memory=(navigator as Navigator & {deviceMemory?:number}).deviceMemory;
       const compact=performanceMode==='compact'||(performanceMode==='auto'&&((memory!==undefined&&memory<=2)||navigator.hardwareConcurrency<=2));
       const max=engine==='v2'?(compact?300:384):512;
-      const packed = usePatchTransport.current ? analysisPixels(bitmap,engine,max) : undefined;
+      const {bitmap,pixels:packed,width,height}=await importRaster(file,engine,max);
       const dataUrl=await new Promise<string>((resolve,reject)=>{
         const reader=new FileReader();reader.onload=()=>resolve(String(reader.result));reader.onerror=reject;reader.readAsDataURL(file);
       });
       if(id!==sequence.current){bitmap.close();return;}
       send({type:'load',id,bitmap,pixels:packed,engine,analysisMax:max,config:options,referenceDataUrl:dataUrl,
-        referenceWidth:bitmap.width,referenceHeight:bitmap.height},[bitmap]);
+        referenceWidth:width,referenceHeight:height},[bitmap]);
     }catch(error){
       if(id===sequence.current)setState(p=>({...p,error:error instanceof Error?error.message:'Could not decode the image.',analysisPhase:''}));
     }
@@ -200,9 +197,8 @@ export function useEngineWorker() {
       const response=await fetch(project.reference.dataUrl);
       const blob=await response.blob();
       const ref=new File([blob],'Project reference',{type:blob.type});
-      const bitmap=await createImageBitmap(blob);
+      const {bitmap,pixels}=await importRaster(blob,engine,engine==='v2'?384:512,engine==='v2'?project.canvas:undefined);
       if(id!==sequence.current){bitmap.close();return;}
-      const pixels=usePatchTransport.current?analysisPixels(bitmap,engine,engine==='v2'?384:512,engine==='v2'?project.canvas:undefined):undefined;
       onProject(project,engine,ref);
       send({type:'restore',id,project,bitmap,pixels,engine},[bitmap]);
     }catch(error){
@@ -277,15 +273,6 @@ export function useEngineWorker() {
     restoreProject,
     toggleTimelapse,replay,refine,seek,inspect,compare,stopBenchmark,
   };
-}
-
-function analysisPixels(bitmap:ImageBitmap,engine:EngineId,limit:number,size?:{width:number;height:number}){
-  const scale=Math.min(1,limit/Math.max(bitmap.width,bitmap.height));
-  const minimum=engine==='v2'?1:8,canvas=document.createElement('canvas');
-  canvas.width=size?.width??Math.max(minimum,Math.round(bitmap.width*scale));canvas.height=size?.height??Math.max(minimum,Math.round(bitmap.height*scale));
-  const context=canvas.getContext('2d',{willReadFrequently:true})!;
-  context.imageSmoothingQuality='high';context.drawImage(bitmap,0,0,canvas.width,canvas.height);
-  return context.getImageData(0,0,canvas.width,canvas.height);
 }
 
 function download(blob:Blob,filename:string) {

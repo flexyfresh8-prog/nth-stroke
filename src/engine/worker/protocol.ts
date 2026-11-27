@@ -60,7 +60,7 @@ export interface DiagnosticInfo {
 }
 export interface BenchmarkResult {
   engine: EngineId; accuracy: Accuracy; count:number; corrections:number; computeMs:number;
-  memory:number|null; rgba:Uint8ClampedArray; width:number; height:number;
+  meanLength?:number; memory:number|null; rgba:Uint8ClampedArray; width:number; height:number;
   history:Array<{strokes:number;ms:number;ssim:number}>;
   stages?: Array<{stage:Stage; rgba:Uint8ClampedArray}>;
 }
