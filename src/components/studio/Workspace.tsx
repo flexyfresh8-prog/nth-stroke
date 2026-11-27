@@ -3,16 +3,16 @@ import { useEffect, useState } from 'react';
 import Studio from './Studio';
 import StructuralStudio from './StructuralStudio';
 import PenStudio from './PenStudio';
-export type Version = 'v1' | 'v2' | 'v3' | 'v4';
+export type Version = 'v1' | 'v2' | 'v3' | 'v4' | 'v5';
 export default function Workspace() {
   const [version, setVersion] = useState<Version | null>(null),
     [file, setFile] = useState<File | null>(null),
     [project, setProject] = useState<File | null>(null);
   useEffect(() => {
-    let id: Version = 'v4';
+    let id: Version = 'v5';
     try {
       const p = localStorage.getItem('nth-engine');
-      if (p === 'v1' || p === 'v2' || p === 'v3') id = p;
+      if (p === 'v1' || p === 'v2' || p === 'v3' || p === 'v4' || p === 'v5') id = p;
     } catch {}
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time localStorage hydration before first paint
     setVersion(id);
@@ -27,7 +27,7 @@ export default function Workspace() {
   async function open(f: File) {
     const head = await f.slice(0, 5).text();
     if (head === 'NTH4\n') {
-      choose('v4');
+      choose(version === 'v5' ? 'v5' : 'v4');
       setProject(f);
     } else if (head === 'NTH3\n') {
       choose('v3');
@@ -38,9 +38,11 @@ export default function Workspace() {
     }
   }
   if (!version) return null;
-  if (version === 'v4')
+  if (version === 'v4' || version === 'v5')
     return (
       <PenStudio
+        key={version}
+        edition={version}
         file={file}
         project={project}
         select={choose}
@@ -52,26 +54,39 @@ export default function Workspace() {
         open={open}
       />
     );
-  return version === 'v3' ? (
-    <StructuralStudio
-      file={file}
-      project={project}
-      select={choose}
-      importFile={(f) => {
-        setProject(null);
-        setFile(f);
-      }}
-      restoredFile={setFile}
-      open={open}
-    />
-  ) : (
-    <Studio
-      initial={version}
-      sharedFile={file}
-      sharedProject={project}
-      selectVersion={choose}
-      shareFile={setFile}
-      openAny={open}
-    />
+  const legacy =
+    version === 'v3' ? (
+      <StructuralStudio
+        file={file}
+        project={project}
+        select={choose}
+        importFile={(f) => {
+          setProject(null);
+          setFile(f);
+        }}
+        restoredFile={setFile}
+        open={open}
+      />
+    ) : (
+      <Studio
+        initial={version}
+        sharedFile={file}
+        sharedProject={project}
+        selectVersion={choose}
+        shareFile={setFile}
+        openAny={open}
+      />
+    );
+  return (
+    <>
+      {legacy}
+      <button
+        className="strong"
+        style={{ position: 'fixed', right: 14, bottom: 14, zIndex: 60 }}
+        onClick={() => choose('v5')}
+      >
+        Try V5 · Human Artist
+      </button>
+    </>
   );
 }

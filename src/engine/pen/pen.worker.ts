@@ -3,9 +3,11 @@
 // from display rate; the speed multiplier only changes HOW MANY deterministic
 // steps run per tick, never the step content. Dirty tiles and telemetry are
 // pushed to the UI thread; commands come back through onmessage.
+// V5: createSimulation() returns the human-motor simulation when options.human > 0.
 
 import { packProject, eventsJSON, strokesJSON, svgExport, unpackProject } from './exporters';
-import { Simulation } from './sim';
+import { createSimulation } from './human';
+import type { Simulation } from './sim';
 import { decodeSource, reduce } from '../structural/source';
 import { normalizeV4, type FromWorker, type SimOptions, type ToWorker } from './types';
 
@@ -89,7 +91,7 @@ async function receive(m: ToWorker) {
       if (!source) throw Error('Open a reference first.');
       const options: SimOptions = stashed ? normalizeV4({ ...m.options, ...stashed.resume.options }) : normalizeV4(m.options);
       const restored = stashed ? { ...stashed.resume, options } : undefined;
-      sim = new Simulation(source, options);
+      sim = createSimulation(source, options);
       if (restored) {
         sim.restore(restored); // restore() re-runs the deterministic analysis
         if (sim.state !== 'done') sim.start();

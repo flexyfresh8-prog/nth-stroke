@@ -12,9 +12,11 @@ import {
   type Telemetry,
   type ToWorker,
 } from '@/engine/pen/types';
+import { humanAmount, v5Human, v5Presets, withHuman } from '@/engine/pen/v5options';
 import type { Version } from './Workspace';
 
 type Props = {
+  edition: 'v4' | 'v5';
   file: File | null;
   project: File | null;
   select: (v: Version) => void;
@@ -83,9 +85,11 @@ function preview(gray: Uint8Array, w: number, h: number) {
 
 const km = (px: number) => (px > 12000 ? (px / 1000).toFixed(1) + 'k px' : Math.round(px) + ' px');
 
-export default function PenStudio({ file, project, select, importFile, restoredFile, open }: Props) {
+export default function PenStudio({ edition, file, project, select, importFile, restoredFile, open }: Props) {
+  const v5 = edition === 'v5';
+  const optKey = v5 ? 'nth-v5-options' : 'nth-v4-options';
   const { theme, setTheme } = useTheme();
-  const [opt, setOpt] = useState<SimOptions>(v4Balanced);
+  const [opt, setOpt] = useState<SimOptions>(v5 ? v5Human : v4Balanced);
   const [speed, setSpeed] = useState(2);
   const [revision, restart] = useState(0);
   const [status, setStatus] = useState<Status>('Import a reference');
@@ -114,16 +118,19 @@ export default function PenStudio({ file, project, select, importFile, restoredF
 
   useEffect(() => {
     try {
-      const s = localStorage.getItem('nth-v4-options');
-      if (s) setOpt(normalizeV4(JSON.parse(s)));
+      const s = localStorage.getItem(optKey);
+      if (s) setOpt(normalizeV4(v5 ? { ...v5Human, ...JSON.parse(s) } : JSON.parse(s)));
     } catch {}
-  }, []);
-  const change = useCallback((next: SimOptions) => {
-    setOpt(next);
-    try {
-      localStorage.setItem('nth-v4-options', JSON.stringify(next));
-    } catch {}
-  }, []);
+  }, [optKey, v5]);
+  const change = useCallback(
+    (next: SimOptions) => {
+      setOpt(next);
+      try {
+        localStorage.setItem(optKey, JSON.stringify(next));
+      } catch {}
+    },
+    [optKey],
+  );
 
   // --- worker lifecycle -----------------------------------------------------
   useEffect(() => {
@@ -205,7 +212,7 @@ export default function PenStudio({ file, project, select, importFile, restoredF
           c.height = h;
           c.getContext('2d')!.putImageData(new ImageData(rgba, w, h), 0, 0);
           c.toBlob((b) => {
-            if (b) save(b, r.kind === 'rgba' ? 'nth-stroke-v4.png' : 'nth-stroke-v4-transparent.png');
+            if (b) save(b, r.kind === 'rgba' ? `nth-stroke-${edition}.png` : `nth-stroke-${edition}-transparent.png`);
             setDownloading('');
           });
           return;
@@ -234,7 +241,7 @@ export default function PenStudio({ file, project, select, importFile, restoredF
       worker?.terminate();
       send.current = () => {};
     };
-  }, [file, revision, project]);
+  }, [file, revision, project, edition]);
 
   const gen = useRef(0);
   const optRef = useRef(opt);
@@ -391,6 +398,8 @@ export default function PenStudio({ file, project, select, importFile, restoredF
 
   const running = status === 'Drawing';
   const pose = panel?.pose;
+  const presets = v5 ? v5Presets : v4Presets;
+  const presetNames = v5 ? ['Fast', 'Human', 'Illustrator', 'Extreme'] : ['Fast', 'Balanced', 'Illustrator', 'Extreme'];
 
   return (
     <div
@@ -404,7 +413,8 @@ export default function PenStudio({ file, project, select, importFile, restoredF
     >
       <header>
         <h1>NTH Stroke</h1>
-        <select aria-label="Drawing engine" value="v4" onChange={(e) => select(e.target.value as Version)}>
+        <select aria-label="Drawing engine" value={edition} onChange={(e) => select(e.target.value as Version)}>
+          <option value="v5">V5 · Human Artist</option>
           <option value="v4">V4 · Virtual Pen Artist</option>
           <option value="v3">V3 · Structural</option>
           <option value="v2">V2 · Adaptive</option>
@@ -482,9 +492,9 @@ export default function PenStudio({ file, project, select, importFile, restoredF
             Preset
             <select
               value={opt.preset}
-              onChange={(e) => change(normalizeV4({ ...opt, ...v4Presets[e.target.value], preset: e.target.value }))}
+              onChange={(e) => change(normalizeV4({ ...opt, ...presets[e.target.value], preset: e.target.value }))}
             >
-              {['Fast', 'Balanced', 'Illustrator', 'Extreme'].map((p) => (
+              {presetNames.map((p) => (
                 <option key={p} value={p}>
                   {p}
                 </option>
@@ -557,6 +567,19 @@ export default function PenStudio({ file, project, select, importFile, restoredF
                 />
               </label>
             ))}
+            {v5 && (
+              <label>
+                Human touch (tremor &amp; drift)
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={humanAmount(opt)}
+                  onChange={(e) => change(normalizeV4(withHuman(opt, +e.target.value)))}
+                />
+              </label>
+            )}
             <label>
               Pen-event recording
               <select value={opt.maxEvents} onChange={(e) => change(normalizeV4({ ...opt, maxEvents: +e.target.value }))}>
@@ -715,7 +738,9 @@ export default function PenStudio({ file, project, select, importFile, restoredF
         </label>
         <span className="spacer" />
         <small>
-          V4 draws through a physically simulated pen — every mark comes from nib contact, pressure and motion.
+          {v5
+            ? 'V5 draws like a hand: a simulated pen with pressure, tilt, tremor and drift — every mark comes from nib contact.'
+            : 'V4 draws through a physically simulated pen — every mark comes from nib contact, pressure and motion.'}
         </small>
       </footer>
     </div>
