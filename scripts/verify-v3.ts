@@ -116,14 +116,21 @@ async function main() {
       }
     const ms = performance.now() - start,
       q = engine.lastQuality!,
-      lines = engine.list.filter((v) => v.mark.axis && v.opacity);
+      lines = engine.list.filter((v) => v.mark.axis && v.opacity),
+      fills = engine.list.filter((v) => !v.mark.axis && v.opacity),
+      guides = engine.list.filter((v) => v.mark.layer === 'Construction' && v.opacity > 0);
     rows.push({
       name,
       engine: 'v3',
       marks: engine.list.length,
       ssim: q.ssim,
       edges: q.edges,
+      missing: q.missing,
+      excess: q.excess,
       ms,
+      lines: lines.length,
+      fills: fills.length,
+      constructionVisible: guides.length,
       meanLength: lines.reduce((s, l) => s + l.mark.length, 0) / (lines.length || 1),
       processPeakKiB: process.resourceUsage().maxRSS,
     });

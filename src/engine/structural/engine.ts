@@ -19,7 +19,7 @@ export type Step = {
   stage: number;
   progress: number;
   action?: Action;
-  quality?: { ssim: number; mae: number; edges: number };
+  quality?: { ssim: number; mae: number; edges: number; missing: number; excess: number };
   note?: string;
 };
 type Raster = { ctx: Context; target: Plane; kx: number; ky: number; ox: number; oy: number };
@@ -112,7 +112,22 @@ export class StructuralEngine {
     const a = Float32Array.from(target.gray, (_, i) => bytes[i * 4] / 255),
       b = Float32Array.from(target.gray, (v) => v / 255);
     const m = measure(a, b, w, h);
-    return (this.lastQuality = { ssim: m.ssim, mae: m.mae, edges: (m.precision + m.recall) / 2 });
+    // Missing-detail and excessive-ink detection: pixels where the render is
+    // meaningfully lighter (missing) or darker (excess) than the reference.
+    let missing = 0,
+      excess = 0;
+    for (let i = 0; i < target.gray.length; i++) {
+      const d = bytes[i * 4] - target.gray[i];
+      if (d > 15) missing++;
+      else if (d < -15) excess++;
+    }
+    return (this.lastQuality = {
+      ssim: m.ssim,
+      mae: m.mae,
+      edges: (m.precision + m.recall) / 2,
+      missing: missing / target.gray.length,
+      excess: excess / target.gray.length,
+    });
   }
   step(action?: Action): Step {
     return {
@@ -363,16 +378,20 @@ export class StructuralEngine {
   }
   *optimize(): Generator<Step> {
     const r = this.view,
+      // Construction guides are processed first and beyond the iteration cap:
+      // a human artist always erases the scaffold before finishing.
+      guides = this.list.filter((v) => v.mark.layer === 'Construction' && v.opacity > 0).length,
       selected = this.list
         .map((v, i) => ({ i, key: v.mark.layer === 'Construction' ? 1e9 : v.mark.importance }))
         .sort((a, b) => b.key - a.key);
-    const count = Math.min(selected.length, 32 * this.opt.iterations);
+    const count = Math.min(selected.length, guides + 32 * this.opt.iterations);
     for (let k = 0; k < count; k++) {
       this.progress = k / count;
       const i = selected[k].i,
         v = this.list[i],
         b = v.mark.box,
         offset = (this.source.w / r.target.w) * 0.55;
+      const guide = v.mark.layer === 'Construction' && v.opacity > 0;
       const area: Box = [b[0] - 2 * offset, b[1] - 2 * offset, b[2] + 2 * offset, b[3] + 2 * offset],
         [x, y, x1, y1] = clipped(r, area);
       const w = x1 - x,
@@ -384,13 +403,18 @@ export class StructuralEngine {
         winner: Action | undefined,
         after = original;
       const base = { ...v };
-      for (const [opacity, dx, dy] of [
-        [0, 0, 0],
-        [v.opacity * 0.65, 0, 0],
-        [Math.min(1, v.opacity * 1.2), 0, 0],
-        [v.opacity, offset, 0],
-        [v.opacity, 0, -offset],
-      ]) {
+      // A guide is only erased when its removal does not explode the local
+      // error, so a load-bearing construction stroke survives as structure.
+      const trials: [number, number, number][] = guide
+        ? [[0, 0, 0]]
+        : [
+            [0, 0, 0],
+            [v.opacity * 0.65, 0, 0],
+            [Math.min(1, v.opacity * 1.2), 0, 0],
+            [v.opacity, offset, 0],
+            [v.opacity, 0, -offset],
+          ];
+      for (const [opacity, dx, dy] of trials) {
         Object.assign(v, { opacity, dx, dy });
         r.ctx.save();
         r.ctx.resetTransform();
@@ -404,7 +428,7 @@ export class StructuralEngine {
         r.ctx.restore();
         const image = r.ctx.getImageData(x, y, w, h),
           score = loss(image.data, r.target, x, y, w);
-        if (score + 1 < best) {
+        if (guide ? score < best * 1.05 + 48 : score + 1 < best) {
           best = score;
           winner = { kind: 'edit', index: i, opacity, dx, dy };
           after = image;
@@ -500,8 +524,12 @@ export class StructuralEngine {
           break;
         }
         case 6:
-          for (let i = 0; i < this.opt.iterations && this.list.length < this.opt.budget; i++)
+          // Correction passes stop early once no meaningful detail is missing:
+          // the engine optimizes fidelity, not stroke count.
+          for (let i = 0; i < this.opt.iterations && this.list.length < this.opt.budget; i++) {
             yield* this.details(Math.min(native, 1024), i + 1);
+            if (this.quality().missing < 0.008) break;
+          }
           break;
         case 7:
           yield* this.optimize();

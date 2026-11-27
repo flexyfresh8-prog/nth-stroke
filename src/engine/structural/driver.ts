@@ -1,15 +1,19 @@
 import { decodeSource, reduce, type Source } from './source';
 import { StructuralEngine, type Step } from './engine';
+import { isolate } from './analysis';
 import type { Options, Hint } from './settings';
 export type Request =
   | { type: 'open'; file: Blob }
   | { type: 'start'; options: Options; hints: Hint[]; skip: number }
-  | { type: 'next'; count: number };
+  | { type: 'next'; count: number }
+  | { type: 'probe'; hints: Hint[]; sensitivity: number }
+  | { type: 'stop' };
 export type Reply =
   | { type: 'ready'; w: number; h: number; preview: Uint8Array; pw: number; ph: number }
   | { type: 'batch'; steps: Step[]; done: boolean }
   | { type: 'error'; message: string }
-  | { type: 'started'; mask:Uint8Array; w:number;h:number };
+  | { type: 'mask'; mask: Uint8Array; w: number; h: number }
+  | { type: 'stopped' };
 export function driver(post: (r: Reply) => void) {
   let source: Source | undefined, iterator: Generator<Step> | undefined;
   return async (m: Request) => {
@@ -22,17 +26,36 @@ export function driver(post: (r: Reply) => void) {
         post({ type: 'ready', w: source.w, h: source.h, preview: p.gray, pw: p.w, ph: p.h });
         return;
       }
+      if (m.type === 'probe' && source) {
+        // Cheap 128px re-segmentation so the user can refine hints and
+        // sensitivity before committing to a drawing session.
+        const { mask, w, h } = isolate(source, m.sensitivity, m.hints);
+        post({ type: 'mask', mask, w, h });
+        return;
+      }
       if (m.type === 'start' && source) {
-        const engine=new StructuralEngine(source,m.options,m.hints);
-        iterator=engine.run();
+        const engine = new StructuralEngine(source, m.options, m.hints);
+        iterator = engine.run();
         for (let n = 0; n < m.skip; n++) {
           if (iterator.next().done) throw Error('Project position exceeds this drawing sequence.');
           if (n % 64 === 63) await new Promise((r) => setTimeout(r, 0));
         }
-        const {mask,w,h}=engine.segmentation;post({type:'started',mask,w,h});
+        const { mask, w, h } = engine.segmentation;
+        post({ type: 'mask', mask, w, h });
         return;
       }
-      if (m.type === 'next' && iterator) {
+      if (m.type === 'stop') {
+        // Cancel the in-flight drawing while keeping the decoded source, so a
+        // new session with different options starts without re-uploading.
+        iterator = undefined;
+        post({ type: 'stopped' });
+        return;
+      }
+      if (m.type === 'next') {
+        if (!iterator) {
+          post({ type: 'stopped' });
+          return;
+        }
         const steps: Step[] = [],
           start = performance.now();
         while (steps.length < m.count) {

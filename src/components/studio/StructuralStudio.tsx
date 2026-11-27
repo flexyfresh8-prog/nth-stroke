@@ -30,6 +30,7 @@ type Status =
   | 'Ready'
   | 'Drawing'
   | 'Paused'
+  | 'Canceled'
   | 'Complete'
   | 'Error'
   | 'Restoring';
@@ -238,10 +239,22 @@ export default function StructuralStudio({ file, project, select, importFile, re
         redraw();
         return;
       }
-      if (r.type === 'started') {
-        setMask(preview(r.mask.map(v=>v?235:42),r.w,r.h));
+      if (r.type === 'mask') {
+        setMask(preview(r.mask.map((v) => (v ? 235 : 42)), r.w, r.h));
+        if (session.current) {
+          waiting.current = false;
+          setStatus(running.current ? 'Drawing' : 'Paused');
+        }
+        return;
+      }
+      if (r.type === 'stopped') {
+        running.current = false;
         waiting.current = false;
-        setStatus(running.current ? 'Drawing' : 'Paused');
+        finished.current = false;
+        batch.current = [];
+        session.current = null;
+        if (tip.current) tip.current.style.visibility = 'hidden';
+        setStatus('Canceled');
         return;
       }
       batch.current.push(...r.steps);
@@ -359,6 +372,15 @@ export default function StructuralStudio({ file, project, select, importFile, re
       send.current = () => {};
     };
   }, [file, project, revision, redraw]);
+  useEffect(() => {
+    // Live segmentation preview: probe the cached source whenever hints or
+    // sensitivity change, so the mask can be refined before starting (and
+    // after a cancellation, while options are unlocked again).
+    if (!file || (status !== 'Ready' && status !== 'Canceled') || session.current || replaying)
+      return;
+    send.current({ type: 'probe', hints, sensitivity: opt.segmentation });
+    if (hints.length) setShowMask(true);
+  }, [file, status, hints, opt.segmentation, replaying]);
   const locked = !!session.current,
     ready = loaded.current;
   function play() {
@@ -372,10 +394,20 @@ export default function StructuralStudio({ file, project, select, importFile, re
     if (doneFlag.current) return;
     if (!session.current) {
       const options = normalize(opt);
+      // A fresh session always restarts from an empty sheet, also after a
+      // cancellation that left a partial drawing on the canvas.
+      history.current = [];
+      placed.current = [];
+      cursor.current = 0;
+      batch.current = [];
+      finished.current = false;
+      doneFlag.current = false;
       session.current = { options, hints: [...hints], steps: 0, complete: false };
       waiting.current = true;
       send.current({ type: 'start', options, hints, skip: 0 });
       clock.current = performance.now();
+      setCount(0);
+      redraw();
     }
     tip.current?.getAnimations().forEach((a) => a.play());
     running.current = true;
@@ -694,6 +726,16 @@ export default function StructuralStudio({ file, project, select, importFile, re
               {status === 'Drawing' ? 'Pause' : status === 'Paused' ? 'Resume' : 'Start'}
             </button>
             <button
+              disabled={!session.current || status === 'Complete' || replaying}
+              onClick={() => {
+                running.current = false;
+                waiting.current = true;
+                send.current({ type: 'stop' });
+              }}
+            >
+              Cancel
+            </button>
+            <button
               disabled={!file}
               onClick={() => {
                 saved.current = null;
@@ -738,6 +780,8 @@ export default function StructuralStudio({ file, project, select, importFile, re
             <span>{count.toLocaleString()} marks</span>
             <span>SSIM {stats.quality?.ssim.toFixed(3) ?? '—'}</span>
             <span>Edge accuracy {stats.quality ? (stats.quality.edges * 100).toFixed(1) + '%' : '—'}</span>
+            <span>Missing ink {stats.quality ? (stats.quality.missing * 100).toFixed(1) + '%' : '—'}</span>
+            <span>Ink excess {stats.quality ? (stats.quality.excess * 100).toFixed(1) + '%' : '—'}</span>
             <span>ETA {status === 'Drawing' ? eta : '—'}</span>
           </div>
         </section>

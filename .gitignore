@@ -34,3 +34,6 @@ repo-nth-stroke/
 skills/
 db/
 prisma/
+
+# verification artifacts
+v3-verification/

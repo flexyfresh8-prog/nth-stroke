@@ -37,3 +37,13 @@ Run `npm test`, `npm run build:export`, and `node --import tsx scripts/verify-v3
 | Faint linework | 0.827 | 0.946 | 0.891 | 21 |
 
 The geometric mask can misclassify subjects against closely matched or complex backgrounds. The engine does not infer semantic anatomy. Faint parallel lines can merge and tonal contours can remain visible in smooth gradients. The 1,000,000-mark limit is a configurable ceiling. A run reaching that count and holding the resulting marks in mobile memory has not been verified. The manga PNG at 10,160 × 16,000 was exercised in desktop WebKit. Physical iPad performance is unverified.
+
+## V3.1 refinements
+
+**Construction erasure.** Stage 8 now treats Construction-layer marks as scaffold to erase, like an artist cleaning pencil guides. Each guide is repainted away and the removal is accepted unless it would raise the local loss beyond `5% + 48` — a load-bearing construction stroke survives as structure. Guides are processed before other trials and outside the iteration cap, so they are erased even with zero optimization passes. Verified: no construction marks remain visible on the benchmark fixtures except one contour-aligned guide kept by the veto.
+
+**Imbalance metrics.** `quality()` now also reports `missing` (fraction of pixels meaningfully lighter than the reference) and `excess` (fraction meaningfully darker). They drive a stopping rule for correction passes — once `missing < 0.8%`, no further pass runs, so the engine optimizes fidelity rather than stroke count — and they are displayed live in the studio metrics bar.
+
+**Driver protocol.** `open | start | next` gained `probe` and `stop`. `probe {hints, sensitivity}` re-runs the 128px segmentation on the cached source and replies with the mask, so the mask preview updates while the user refines hints before starting (and after a cancellation). `stop` drops the generator, keeps the decoded source, and acknowledges with `stopped`; `next` without an active drawing replies `stopped` instead of hanging. The studio's **Cancel** uses it: options unlock immediately and a new session starts without re-decoding the file. A fresh session always restarts from an empty sheet.
+
+These behaviors are covered by `tests/engine/structural.test.ts` (guide erasure, imbalance tracking, probe/batch/cancel protocol) and by the browser walkthrough in `V3-VERIFICATION.md`.

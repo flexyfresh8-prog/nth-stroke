@@ -7,6 +7,7 @@ import { balanced } from '../../src/engine/structural/settings';
 import { apply, svg, type Action, type Placed } from '../../src/engine/structural/geometry';
 import { exportPng } from '../../src/engine/structural/export-png';
 import { pack, unpack } from '../../src/engine/structural/project';
+import { driver, type Reply } from '../../src/engine/structural/driver';
 import { sphereFixture } from './fixtures';
 
 beforeAll(() =>
@@ -75,6 +76,50 @@ describe('hierarchical construction', () => {
     const png = await decodeSource(transparent);
     expect(png.w).toBe(64);
     expect(Math.min(...png.gray)).toBeLessThan(100);
+  });
+  it('erases construction guides during final refinement and tracks imbalance', async () => {
+    const engine = new StructuralEngine(await decodeSource(reference()), cfg),
+      blank = engine.quality();
+    expect(blank.missing).toBeGreaterThan(0.05);
+    expect(blank.excess).toBe(0);
+    let guides = 0,
+      removals = 0;
+    for (const s of engine.run()) {
+      if (s.action?.kind === 'add' && s.action.mark.layer === 'Construction') guides++;
+      if (s.action?.kind === 'edit' && s.action.opacity === 0) removals++;
+    }
+    expect(guides).toBeGreaterThan(0);
+    expect(removals).toBeGreaterThan(0);
+    // The scaffold is visibly drawn in stage 1 and fully erased by stage 8.
+    expect(engine.list.some((v) => v.mark.layer === 'Construction' && v.opacity > 0)).toBe(false);
+    const last = engine.lastQuality!;
+    expect(last.missing).toBeLessThan(blank.missing);
+    expect(last.excess).toBeLessThan(0.05);
+    expect(last.ssim).toBeGreaterThan(blank.ssim);
+  });
+  it('supports mask probing, cooperative batches and cancellation at the driver layer', async () => {
+    const replies: Reply[] = [],
+      receive = driver((r) => replies.push(r));
+    await receive({ type: 'open', file: reference() });
+    expect(replies.at(-1)!.type).toBe('ready');
+    await receive({ type: 'probe', hints: [{ x: 0.5, y: 0.5, subject: true }], sensitivity: 0.5 });
+    const probed = replies.at(-1)!;
+    expect(probed.type).toBe('mask');
+    if (probed.type === 'mask') {
+      expect(probed.mask.length).toBe(probed.w * probed.h);
+      expect(probed.mask[Math.floor(probed.h / 2) * probed.w + Math.floor(probed.w / 2)]).toBe(1);
+    }
+    await receive({ type: 'start', options: cfg, hints: [], skip: 0 });
+    expect(replies.at(-1)!.type).toBe('mask');
+    await receive({ type: 'next', count: 4 });
+    const batch = replies.at(-1)!;
+    expect(batch.type).toBe('batch');
+    if (batch.type === 'batch') expect(batch.steps.length).toBeGreaterThan(0);
+    await receive({ type: 'stop' });
+    expect(replies.at(-1)!.type).toBe('stopped');
+    // Batches after cancellation acknowledge the stop instead of hanging.
+    await receive({ type: 'next', count: 4 });
+    expect(replies.at(-1)!.type).toBe('stopped');
   });
   it('reads a 16K scanline PNG and retains detail in original coordinates', async () => {
     const w = 16384,
